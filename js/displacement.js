@@ -26,8 +26,15 @@ export function applyDisplacement(geometry, imageData, imgWidth, imgHeight, sett
   const newPos = new Float32Array(count * 3);
   const newNrm = new Float32Array(count * 3);
 
-  const tmpPos = new THREE.Vector3();
-  const tmpNrm = new THREE.Vector3();
+  const tmpPos  = new THREE.Vector3();
+  const tmpNrm  = new THREE.Vector3();
+  // Reusable vectors for per-face normal computation
+  const vA      = new THREE.Vector3();
+  const vB      = new THREE.Vector3();
+  const vC      = new THREE.Vector3();
+  const edge1   = new THREE.Vector3();
+  const edge2   = new THREE.Vector3();
+  const faceNrm = new THREE.Vector3();
 
   const REPORT_EVERY = 5000;
 
@@ -35,7 +42,24 @@ export function applyDisplacement(geometry, imageData, imgWidth, imgHeight, sett
     tmpPos.fromBufferAttribute(posAttr, i);
     tmpNrm.fromBufferAttribute(nrmAttr, i);
 
-    const uvResult = computeUV(tmpPos, tmpNrm, settings.mappingMode, settings, bounds);
+    // Compute a stable face normal from the triangle's own vertex positions.
+    // The subdivider deduplicates vertices by position only, so shared corner
+    // vertices pick up whichever face's normal happened to be stored first.
+    // For hard-edged meshes (e.g. a cube) this corrupts the stored normals at
+    // edges/corners.  Recomputing from the triangle geometry is always correct
+    // for the flat-shaded STL source data and gives the right normal for both
+    // displacement direction and UV projection.
+    const base = Math.floor(i / 3) * 3;
+    vA.fromBufferAttribute(posAttr, base);
+    vB.fromBufferAttribute(posAttr, base + 1);
+    vC.fromBufferAttribute(posAttr, base + 2);
+    edge1.subVectors(vB, vA);
+    edge2.subVectors(vC, vA);
+    faceNrm.crossVectors(edge1, edge2);
+    // Fall back to the stored vertex normal for degenerate triangles
+    const useNrm = faceNrm.lengthSq() > 1e-10 ? faceNrm.normalize() : tmpNrm;
+
+    const uvResult = computeUV(tmpPos, useNrm, settings.mappingMode, settings, bounds);
 
     let grey;
     if (uvResult.triplanar) {
@@ -50,13 +74,13 @@ export function applyDisplacement(geometry, imageData, imgWidth, imgHeight, sett
 
     const disp = grey * settings.amplitude;
 
-    newPos[i*3]   = tmpPos.x + tmpNrm.x * disp;
-    newPos[i*3+1] = tmpPos.y + tmpNrm.y * disp;
-    newPos[i*3+2] = tmpPos.z + tmpNrm.z * disp;
+    newPos[i*3]   = tmpPos.x + useNrm.x * disp;
+    newPos[i*3+1] = tmpPos.y + useNrm.y * disp;
+    newPos[i*3+2] = tmpPos.z + useNrm.z * disp;
 
-    newNrm[i*3]   = tmpNrm.x;
-    newNrm[i*3+1] = tmpNrm.y;
-    newNrm[i*3+2] = tmpNrm.z;
+    newNrm[i*3]   = useNrm.x;
+    newNrm[i*3+1] = useNrm.y;
+    newNrm[i*3+2] = useNrm.z;
 
     if (onProgress && i % REPORT_EVERY === 0) onProgress(i / count);
   }

@@ -3,6 +3,57 @@ import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 
 let renderer, camera, scene, controls, meshGroup, ambientLight, dirLight1, dirLight2, grid;
 let currentMesh = null;
+let gizmoScene, gizmoCamera;
+
+const GIZMO_PX     = 90;  // gizmo viewport size in CSS pixels
+const GIZMO_MARGIN = 14;
+
+function buildGizmo() {
+  gizmoScene  = new THREE.Scene();
+  gizmoCamera = new THREE.OrthographicCamera(-1.6, 1.6, 1.6, -1.6, 0.1, 10);
+  gizmoCamera.position.set(0, 0, 3);
+
+  const addAxis = (dir, hex, label) => {
+    // Shaft line
+    const shaft = new THREE.BufferGeometry().setFromPoints([
+      new THREE.Vector3(0, 0, 0),
+      dir.clone().multiplyScalar(0.78),
+    ]);
+    gizmoScene.add(new THREE.Line(
+      shaft,
+      new THREE.LineBasicMaterial({ color: hex, depthTest: false }),
+    ));
+
+    // Arrow-head cone
+    const cone = new THREE.Mesh(
+      new THREE.ConeGeometry(0.10, 0.24, 8),
+      new THREE.MeshBasicMaterial({ color: hex, depthTest: false }),
+    );
+    cone.position.copy(dir.clone().multiplyScalar(0.92));
+    cone.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), dir);
+    gizmoScene.add(cone);
+
+    // Text label sprite
+    const c   = document.createElement('canvas');
+    c.width   = c.height = 64;
+    const ctx = c.getContext('2d');
+    ctx.fillStyle = `#${hex.toString(16).padStart(6, '0')}`;
+    ctx.font      = 'bold 46px Arial';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(label, 32, 32);
+    const sprite = new THREE.Sprite(
+      new THREE.SpriteMaterial({ map: new THREE.CanvasTexture(c), depthTest: false }),
+    );
+    sprite.position.copy(dir.clone().multiplyScalar(1.26));
+    sprite.scale.set(0.42, 0.42, 1);
+    gizmoScene.add(sprite);
+  };
+
+  addAxis(new THREE.Vector3(1, 0, 0), 0xff4040, 'X');
+  addAxis(new THREE.Vector3(0, 1, 0), 0x44dd44, 'Y');
+  addAxis(new THREE.Vector3(0, 0, 1), 0x5599ff, 'Z');
+}
 
 export function initViewer(canvas) {
   // Renderer
@@ -54,6 +105,8 @@ export function initViewer(canvas) {
   controls.maxDistance = 3000;
   controls.screenSpacePanning = true;
 
+  buildGizmo();
+
   // Resize observer
   const resizeObserver = new ResizeObserver(() => onResize());
   resizeObserver.observe(canvas.parentElement);
@@ -63,7 +116,29 @@ export function initViewer(canvas) {
   (function animate() {
     requestAnimationFrame(animate);
     controls.update();
+
+    const cw = renderer.domElement.clientWidth;
+    const ch = renderer.domElement.clientHeight;
+
+    // 1. Main scene — full viewport
+    renderer.setScissorTest(false);
+    renderer.setViewport(0, 0, cw, ch);
     renderer.render(scene, camera);
+
+    // 2. Gizmo overlay — upper-right corner
+    //    WebGL y=0 is at bottom, so upper-right means large y.
+    const gx = cw - GIZMO_PX - GIZMO_MARGIN;
+    const gy = ch - GIZMO_PX - GIZMO_MARGIN;
+    gizmoCamera.quaternion.copy(camera.quaternion);
+    renderer.setScissorTest(true);
+    renderer.setScissor(gx, gy, GIZMO_PX, GIZMO_PX);
+    renderer.setViewport(gx, gy, GIZMO_PX, GIZMO_PX);
+    renderer.autoClear = false;
+    renderer.clearDepth();
+    renderer.render(gizmoScene, gizmoCamera);
+    renderer.autoClear = true;
+    renderer.setScissorTest(false);
+    renderer.setViewport(0, 0, cw, ch);
   })();
 }
 

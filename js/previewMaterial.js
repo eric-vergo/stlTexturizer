@@ -106,8 +106,8 @@ const fragmentShader = /* glsl */`
       // Picks the single planar projection whose axis is most aligned with the face normal.
       vec3 absN = abs(MN);
       if (absN.x >= absN.y && absN.x >= absN.z) {
-        // ±X dominant → project onto YZ plane
-        return sampleMap((pos.yz - boundsMin.yz) / max(boundsSize.yz, vec2(1e-4)));
+        // ±X dominant → project onto ZY plane (U=Z, V=Y keeps texture upright on side faces)
+        return sampleMap((pos.zy - boundsMin.zy) / max(boundsSize.zy, vec2(1e-4)));
       } else if (absN.y >= absN.x && absN.y >= absN.z) {
         // ±Y dominant → project onto XZ plane
         return sampleMap((pos.xz - boundsMin.xz) / max(boundsSize.xz, vec2(1e-4)));

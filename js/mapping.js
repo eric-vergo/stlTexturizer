@@ -78,9 +78,9 @@ export function computeUV(pos, normal, mode, settings, bounds) {
       const az = Math.abs(normal.z);
       let uRaw, vRaw;
       if (ax >= ay && ax >= az) {
-        // ±X dominant → project onto YZ
-        uRaw = (pos.y - min.y) / Math.max(size.y, 1e-6);
-        vRaw = (pos.z - min.z) / Math.max(size.z, 1e-6);
+        // ±X dominant → project onto ZY (U=Z, V=Y keeps texture upright on side faces)
+        uRaw = (pos.z - min.z) / Math.max(size.z, 1e-6);
+        vRaw = (pos.y - min.y) / Math.max(size.y, 1e-6);
       } else if (ay >= ax && ay >= az) {
         // ±Y dominant → project onto XZ
         uRaw = (pos.x - min.x) / Math.max(size.x, 1e-6);

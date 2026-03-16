@@ -245,7 +245,7 @@ async function handleSTL(file) {
 
     // Default edge length = 1/100 of the largest bounding box dimension
     const maxDim = Math.max(bounds.size.x, bounds.size.y, bounds.size.z);
-    const defaultEdge = Math.max(0.1, Math.min(5.0, +(maxDim / 100).toFixed(2)));
+    const defaultEdge = Math.max(0.1, Math.min(5.0, +(maxDim / 200).toFixed(2)));
     settings.refineLength = defaultEdge;
     refineLenSlider.value = defaultEdge;
     refineLenVal.textContent = `${defaultEdge.toFixed(2)} mm`;
