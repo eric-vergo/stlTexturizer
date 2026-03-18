@@ -102,8 +102,8 @@ export const TRANSLATIONS = {
     'progress.subdividing':          'Subdividing mesh\u2026',
     'progress.applyingDisplacement': 'Applying displacement to {n} triangles\u2026',
     'progress.displacingVertices':   'Displacing vertices\u2026',
-    'progress.decimatingTo':         'Decimating {from} \u2192 {to} triangles\u2026',
-    'progress.decimating':           'Decimating: {cur} \u2192 {to} triangles',
+    'progress.decimatingTo':         'Simplifying {from} \u2192 {to} triangles\u2026',
+    'progress.decimating':           'Simplifying: {cur} \u2192 {to} triangles',
     'progress.writingStl':           'Writing STL\u2026',
     'progress.done':                 'Done!',
     'progress.processing':           'Processing\u2026',
@@ -212,7 +212,7 @@ export const TRANSLATIONS = {
 
     // Export section
     'sections.export':               'Export \u24d8',
-    'tooltips.export':               'Kleinere Kantenl\u00e4nge = feineres Verschiebungsdetail. Die Ausgabe wird dann auf das Dreieckslimit dezimiert.',
+    'tooltips.export':               'Kleinere Kantenl\u00e4nge = mehr Texturdetails. Die Ausgabe wird dann auf das Dreieckslimit vereinfacht.',
     'labels.resolution':             'Aufl\u00f6sung',
     'tooltips.resolution':           'Kanten l\u00e4nger als dieser Wert werden beim Export unterteilt',
     'labels.outputTriangles':        'Max Dreiecke',
@@ -221,11 +221,11 @@ export const TRANSLATIONS = {
     'ui.exportStl':                  'STL exportieren',
 
     // Export progress stages
-    'progress.subdividing':          'Netz wird unterteilt\u2026',
-    'progress.applyingDisplacement': 'Verschiebung auf {n} Dreiecke anwenden\u2026',
-    'progress.displacingVertices':   'Vertices werden verschoben\u2026',
-    'progress.decimatingTo':         '{from} \u2192 {to} Dreiecke dezimieren\u2026',
-    'progress.decimating':           'Dezimieren: {cur} \u2192 {to} Dreiecke',
+    'progress.subdividing':          'Netz wird verfeinert\u2026',
+    'progress.applyingDisplacement': 'Textur auf {n} Dreiecke anwenden\u2026',
+    'progress.displacingVertices':   'Punkte werden verschoben\u2026',
+    'progress.decimatingTo':         '{from} \u2192 {to} Dreiecke vereinfachen\u2026',
+    'progress.decimating':           'Vereinfachen: {cur} \u2192 {to} Dreiecke',
     'progress.writingStl':           'STL schreiben\u2026',
     'progress.done':                 'Fertig!',
     'progress.processing':           'Verarbeitung\u2026',

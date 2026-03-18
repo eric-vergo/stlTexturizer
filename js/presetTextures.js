@@ -14,18 +14,18 @@ function makeCanvas(size = SIZE) {
 // ── Image-based presets ───────────────────────────────────────────────────────
 
 const IMAGE_PRESETS = [
-  { name: 'Basket',   url: 'basket.jpg'   },
-  { name: 'Brick',    url: 'brick.jpg'    },
-  { name: 'Bubble',   url: 'bubble.jpg'   },
-  { name: 'Crystal',  url: 'crystal.jpg'  },
-  { name: 'Hexagon',  url: 'hexagon.jpg'  },
-  { name: 'Knitting', url: 'knitting.jpg' },
-  { name: 'Knurling', url: 'knurling.jpg' },
-  { name: 'Leather',  url: 'leather.jpg'  },
-  { name: 'Leather 2', url: 'leather2.jpg' },
-  { name: 'Weave',    url: 'weave.jpg'    },
-  { name: 'Wood',     url: 'wood.jpg'     },
-  { name: 'Noise',    url: 'noise.jpg'    },
+  { name: 'Basket',    url: 'textures/basket.jpg'   },
+  { name: 'Brick',     url: 'textures/brick.jpg'    },
+  { name: 'Bubble',    url: 'textures/bubble.jpg'   },
+  { name: 'Crystal',   url: 'textures/crystal.jpg'  },
+  { name: 'Hexagon',   url: 'textures/hexagon.jpg'  },
+  { name: 'Knitting',  url: 'textures/knitting.jpg' },
+  { name: 'Knurling',  url: 'textures/knurling.jpg' },
+  { name: 'Leather',   url: 'textures/leather.jpg'  },
+  { name: 'Leather 2', url: 'textures/leather2.jpg' },
+  { name: 'Weave',     url: 'textures/weave.jpg'    },
+  { name: 'Wood',      url: 'textures/wood.jpg'     },
+  { name: 'Noise',     url: 'textures/noise.jpg'    },
 ];
 
 function loadImagePreset({ name, url }) {

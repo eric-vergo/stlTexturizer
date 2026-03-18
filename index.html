@@ -9,7 +9,7 @@
     // Apply saved theme before first paint to avoid flash
     (function() {
       const t = localStorage.getItem('stlt-theme');
-      if (t === 'light') document.documentElement.setAttribute('data-theme', 'light');
+      if (t !== 'dark') document.documentElement.setAttribute('data-theme', 'light');
     })();
     // Apply saved language before first paint to avoid flash
     (function() {
