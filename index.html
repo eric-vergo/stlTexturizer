@@ -82,6 +82,7 @@
           <input type="checkbox" id="wireframe-toggle" />
           <span data-i18n="ui.wireframe">Wireframe</span>
         </label>
+
         <div class="viewport-controls-hint" data-i18n="ui.controlsHint">Left drag: orbit &nbsp;·&nbsp; Right drag: pan &nbsp;·&nbsp; Scroll: zoom</div>
       </div>
     </section>
@@ -91,10 +92,16 @@
 
       <!-- Load STL -->
       <section class="panel-section">
-        <label class="upload-btn" for="stl-file-input" style="width:100%;box-sizing:border-box;justify-content:center;">
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none"><path d="M12 2L2 7l10 5 10-5-10-5Z" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/><path d="M2 17l10 5 10-5M2 12l10 5 10-5" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/></svg>
-          <span data-i18n="ui.loadStl">Load STL…</span>
-        </label>
+        <div class="load-stl-row">
+          <label class="upload-btn" for="stl-file-input" style="flex:1;justify-content:center;">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none"><path d="M12 2L2 7l10 5 10-5-10-5Z" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/><path d="M2 17l10 5 10-5M2 12l10 5 10-5" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/></svg>
+            <span data-i18n="ui.loadStl">Load STL…</span>
+          </label>
+          <button id="place-on-face-btn" class="place-on-face-btn" data-i18n-title="ui.placeOnFaceTitle" title="Click a face to orient it downward onto the print bed">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none"><path d="M12 3v14m0 0l-5-5m5 5l5-5" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/><path d="M4 21h16" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
+            <span data-i18n="ui.placeOnFace">Place on Face</span>
+          </button>
+        </div>
       </section>
 
       <!-- Displacement Map -->

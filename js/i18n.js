@@ -98,6 +98,10 @@ export const TRANSLATIONS = {
     // Displacement preview
     'labels.displacementPreview':    '3D Preview \u24d8',
     'tooltips.displacementPreview':  'Subdivides the mesh and displaces vertices in real-time so you can judge the actual depth. GPU-intensive on complex models.',
+
+    // Place on face
+    'ui.placeOnFace':                'Place on Face',
+    'ui.placeOnFaceTitle':           'Click a face to orient it downward onto the print bed',
     'progress.subdividingPreview':   'Preparing preview\u2026',
 
     // Amplitude overlap warning
@@ -242,6 +246,10 @@ export const TRANSLATIONS = {
     // Displacement preview
     'labels.displacementPreview':    '3D-Vorschau \u24d8',
     'tooltips.displacementPreview':  'Unterteilt das Netz und verschiebt Punkte in Echtzeit, damit die tats\u00e4chliche Tiefe sichtbar wird. GPU-intensiv bei komplexen Modellen.',
+
+    // Auf Fl\u00e4che platzieren
+    'ui.placeOnFace':                'Auf Fl\u00e4che platzieren',
+    'ui.placeOnFaceTitle':           'Klicken Sie auf eine Fl\u00e4che, um sie nach unten auf das Druckbett auszurichten',
     'progress.subdividingPreview':   'Vorschau wird vorbereitet\u2026',
 
     // Amplitude overlap warning

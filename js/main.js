@@ -35,6 +35,7 @@ let bucketThreshold    = 20;
 let isPainting         = false;
 let selectionMode      = false;       // false = exclude painted faces; true = include only painted faces
 let _lastHoverTriIdx   = -1;          // last triangle index used for hover preview
+let placeOnFaceActive  = false;       // true while "Place on Face" mode is active
 const _raycaster       = new THREE.Raycaster();
 
 const settings = {
@@ -79,6 +80,7 @@ const exportProgPct    = document.getElementById('export-progress-pct');
 const exportProgLbl    = document.getElementById('export-progress-label');
 const triLimitWarning  = document.getElementById('tri-limit-warning');
 const wireframeToggle  = document.getElementById('wireframe-toggle');
+const placeOnFaceBtn   = document.getElementById('place-on-face-btn');
 
 const mappingSelect   = document.getElementById('mapping-mode');
 const scaleUSlider    = document.getElementById('scale-u');
@@ -337,6 +339,11 @@ function wireEvents() {
     toggleDisplacementPreview(dispPreviewToggle.checked);
   });
 
+  // ── Place on Face ──
+  placeOnFaceBtn.addEventListener('click', () => {
+    togglePlaceOnFace(!placeOnFaceActive);
+  });
+
   // ── License ──
   licenseLink.addEventListener('click', () => licenseOverlay.classList.remove('hidden'));
   licenseClose.addEventListener('click', () => licenseOverlay.classList.add('hidden'));
@@ -434,7 +441,16 @@ function wireEvents() {
 
   // ── Canvas mouse events for exclusion painting ────────────────────────────
   canvas.addEventListener('mousedown', (e) => {
-    if (!currentGeometry || !exclusionTool || e.button !== 0) return;
+    if (!currentGeometry || e.button !== 0) return;
+
+    // Place on Face mode
+    if (placeOnFaceActive) {
+      e.preventDefault();
+      handlePlaceOnFaceClick(e);
+      return;
+    }
+
+    if (!exclusionTool) return;
 
     if (exclusionTool === 'bucket') {
       e.preventDefault();
@@ -464,6 +480,10 @@ function wireEvents() {
   });
 
   canvas.addEventListener('mousemove', (e) => {
+    if (placeOnFaceActive && currentGeometry) {
+      updatePlaceOnFaceHover(e);
+      return;
+    }
     if (exclusionTool === 'brush' && brushIsRadius) {
       updateBrushCursor(e);
     }
@@ -493,6 +513,7 @@ function wireEvents() {
 
   document.addEventListener('keydown', (e) => {
     if (e.key === 'Escape') {
+      if (placeOnFaceActive) togglePlaceOnFace(false);
       if (exclusionTool) setExclusionTool(null);
       licenseOverlay.classList.add('hidden');
     }
@@ -521,6 +542,9 @@ function setSelectionMode(include) {
 function setExclusionTool(tool) {
   // Clicking the active tool toggles it off; passing null always deactivates
   exclusionTool = (exclusionTool === tool) ? null : tool;
+
+  // Deactivate place-on-face if an exclusion tool is being activated
+  if (exclusionTool && placeOnFaceActive) togglePlaceOnFace(false);
 
   // Exit 3D displacement preview when a masking tool is activated
   if (exclusionTool && settings.useDisplacement) {
@@ -622,6 +646,144 @@ function paintAt(e) {
   }
 
   refreshExclusionOverlay();
+}
+
+// ── Place on Face ─────────────────────────────────────────────────────────────
+
+function togglePlaceOnFace(active) {
+  placeOnFaceActive = active;
+  placeOnFaceBtn.classList.toggle('active', active);
+
+  if (active) {
+    // Deactivate exclusion tool
+    if (exclusionTool) setExclusionTool(null);
+    canvas.style.cursor = 'crosshair';
+  } else {
+    if (!exclusionTool) canvas.style.cursor = '';
+    _lastHoverTriIdx = -1;
+    setHoverPreview(null);
+  }
+}
+
+function updatePlaceOnFaceHover(e) {
+  const mesh = getCurrentMesh();
+  if (!mesh) { setHoverPreview(null); return; }
+  _raycaster.setFromCamera(_canvasNDC(e), getCamera());
+  const hits = _raycaster.intersectObject(mesh);
+  const hit = getFrontFaceHit(hits, mesh);
+  if (!hit) { _lastHoverTriIdx = -1; setHoverPreview(null); return; }
+
+  let triIdx = hit.faceIndex;
+  if (dispPreviewGeometry && mesh.geometry === dispPreviewGeometry && dispPreviewParentMap) {
+    triIdx = dispPreviewParentMap[triIdx];
+  }
+  if (triIdx === _lastHoverTriIdx) return;
+  _lastHoverTriIdx = triIdx;
+  setHoverPreview(buildExclusionOverlayGeo(currentGeometry, new Set([triIdx])));
+}
+
+function handlePlaceOnFaceClick(e) {
+  const mesh = getCurrentMesh();
+  if (!mesh) return;
+  _raycaster.setFromCamera(_canvasNDC(e), getCamera());
+  const hits = _raycaster.intersectObject(mesh);
+  const hit = getFrontFaceHit(hits, mesh);
+  if (!hit) return;
+
+  // Get the face normal (mesh has identity transform)
+  const faceNormal = hit.face.normal.clone().normalize();
+
+  // Compute quaternion that rotates faceNormal to -Z (face down on print bed)
+  const targetDir = new THREE.Vector3(0, 0, -1);
+  const quat = new THREE.Quaternion().setFromUnitVectors(faceNormal, targetDir);
+
+  // Apply rotation to all vertex positions
+  const pos = currentGeometry.attributes.position.array;
+  const v = new THREE.Vector3();
+  for (let i = 0; i < pos.length; i += 3) {
+    v.set(pos[i], pos[i + 1], pos[i + 2]);
+    v.applyQuaternion(quat);
+    pos[i]     = v.x;
+    pos[i + 1] = v.y;
+    pos[i + 2] = v.z;
+  }
+
+  // Re-center geometry
+  currentGeometry.computeBoundingBox();
+  const center = new THREE.Vector3();
+  currentGeometry.boundingBox.getCenter(center);
+  currentGeometry.translate(-center.x, -center.y, -center.z);
+
+  // Recompute normals from scratch (fixes lighting + angle masking)
+  currentGeometry.computeVertexNormals();
+  // Delete stale faceNormal attribute so updateFaceMask() recomputes it
+  // from the new rotated positions (needed for correct angle masking in 2D preview)
+  if (currentGeometry.attributes.faceNormal) {
+    currentGeometry.deleteAttribute('faceNormal');
+  }
+
+  // Now reload as if this were a freshly loaded STL
+  currentBounds = computeBounds(currentGeometry);
+  checkAmplitudeWarning();
+
+  // Dispose old preview material so it gets fully recreated
+  if (previewMaterial) {
+    previewMaterial.dispose();
+    previewMaterial = null;
+  }
+
+  loadGeometry(currentGeometry);
+
+  // Reset displacement preview
+  if (dispPreviewGeometry) { dispPreviewGeometry.dispose(); dispPreviewGeometry = null; }
+  settings.useDisplacement = false;
+  dispPreviewToggle.checked = false;
+
+  // Deactivate tools but keep excludedFaces (face indices are stable after rotation)
+  exclusionTool     = null;
+  eraseMode         = false;
+  isPainting        = false;
+  exclBrushBtn.classList.remove('active');
+  exclBucketBtn.classList.remove('active');
+  exclBrushTypeRow.classList.add('hidden');
+  exclRadiusRow.classList.add('hidden');
+  exclThresholdRow.classList.add('hidden');
+  canvas.style.cursor = '';
+  setHoverPreview(null);
+  _lastHoverTriIdx = -1;
+
+  // Rebuild adjacency
+  const adjData = buildAdjacency(currentGeometry);
+  triangleAdjacency = adjData.adjacency;
+  triangleCentroids = adjData.centroids;
+
+  // Update edge length for new bounds
+  const maxDim = Math.max(currentBounds.size.x, currentBounds.size.y, currentBounds.size.z);
+  const defaultEdge = Math.max(0.05, Math.min(5.0, +(maxDim / 200).toFixed(2)));
+  settings.refineLength = defaultEdge;
+  refineLenSlider.value = defaultEdge;
+  refineLenVal.value = defaultEdge;
+
+  // Update mesh info
+  const triCount = getTriangleCount(currentGeometry);
+  const mb = ((currentGeometry.attributes.position.array.byteLength) / 1024 / 1024).toFixed(2);
+  const sx = currentBounds.size.x.toFixed(2);
+  const sy = currentBounds.size.y.toFixed(2);
+  const sz = currentBounds.size.z.toFixed(2);
+  meshInfo.textContent = t('ui.meshInfo', { n: triCount.toLocaleString(), mb, sx, sy, sz });
+
+  exportBtn.disabled = (activeMapEntry === null);
+  updatePreview();
+
+  // Rebuild exclusion overlay with new vertex positions (face indices unchanged)
+  if (excludedFaces.size > 0) {
+    refreshExclusionOverlay();
+  } else {
+    setExclusionOverlay(null);
+  }
+
+  // Exit place-on-face mode
+  togglePlaceOnFace(false);
 }
 
 function refreshExclusionOverlay() {
@@ -799,6 +961,7 @@ function loadDefaultCube() {
   exclusionTool     = null;
   eraseMode         = false;
   isPainting        = false;
+  if (placeOnFaceActive) togglePlaceOnFace(false);
   exclBrushBtn.classList.remove('active');
   exclBucketBtn.classList.remove('active');
   exclBrushTypeRow.classList.add('hidden');
@@ -874,6 +1037,7 @@ async function handleSTL(file) {
     exclusionTool     = null;
     eraseMode         = false;
     isPainting        = false;
+    if (placeOnFaceActive) togglePlaceOnFace(false);
     exclBrushBtn.classList.remove('active');
     exclBucketBtn.classList.remove('active');
     exclBrushTypeRow.classList.add('hidden');

@@ -287,6 +287,36 @@ main {
   user-select: none;
 }
 
+.place-on-face-btn {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 11px;
+  color: var(--text-muted);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  cursor: pointer;
+  padding: 6px 10px;
+  user-select: none;
+  font-family: inherit;
+  white-space: nowrap;
+}
+.place-on-face-btn:hover {
+  color: var(--text);
+  border-color: var(--accent);
+}
+.place-on-face-btn.active {
+  color: var(--accent);
+  border-color: var(--accent);
+}
+
+.load-stl-row {
+  display: flex;
+  gap: 8px;
+  align-items: stretch;
+}
+
 /* ── Settings panel ──────────────────────────────────────────────────── */
 #settings-panel {
   width: var(--sidebar-w);
