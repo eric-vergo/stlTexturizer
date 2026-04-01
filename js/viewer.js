@@ -269,14 +269,16 @@ export function initViewer(canvas) {
     }
   });
 
-  // Pinch-to-zoom for touch devices
+  // Pinch-to-zoom + two-finger pan for touch devices
   let _pinchDist = null;
+  let _pinchMid  = null;  // { x, y } client coords of two-finger midpoint
 
   renderer.domElement.addEventListener('touchstart', (e) => {
     if (e.touches.length === 2) {
       const t0 = e.touches[0], t1 = e.touches[1];
       _pinchDist = Math.hypot(t1.clientX - t0.clientX, t1.clientY - t0.clientY);
-      controls.enabled = false;  // suppress OrbitControls panning during pinch
+      _pinchMid  = { x: (t0.clientX + t1.clientX) / 2, y: (t0.clientY + t1.clientY) / 2 };
+      controls.enabled = false;  // suppress OrbitControls during two-finger gesture
       e.preventDefault();
     }
   }, { passive: false });
@@ -285,31 +287,45 @@ export function initViewer(canvas) {
     if (e.touches.length !== 2 || _pinchDist === null) return;
     e.preventDefault();
     const t0 = e.touches[0], t1 = e.touches[1];
-    const newDist = Math.hypot(t1.clientX - t0.clientX, t1.clientY - t0.clientY);
-    const factor  = newDist / _pinchDist;
-    _pinchDist    = newDist;
-
-    // Midpoint in NDC — zoom toward the centre of the two fingers
     const rect = renderer.domElement.getBoundingClientRect();
-    const midX = (t0.clientX + t1.clientX) / 2;
-    const midY = (t0.clientY + t1.clientY) / 2;
-    const ndcX =  ((midX - rect.left) / rect.width)  * 2 - 1;
-    const ndcY = -((midY - rect.top)  / rect.height) * 2 + 1;
 
-    const before = new THREE.Vector3(ndcX, ndcY, 0).unproject(camera);
+    const newDist = Math.hypot(t1.clientX - t0.clientX, t1.clientY - t0.clientY);
+    const midX    = (t0.clientX + t1.clientX) / 2;
+    const midY    = (t0.clientY + t1.clientY) / 2;
+
+    // ── Pan: shift camera so the world point under the old midpoint
+    //         is now under the new midpoint ──────────────────────────
+    const prevNdcX =  ((_pinchMid.x - rect.left) / rect.width)  * 2 - 1;
+    const prevNdcY = -((_pinchMid.y - rect.top)  / rect.height) * 2 + 1;
+    const curNdcX  =  ((midX - rect.left) / rect.width)  * 2 - 1;
+    const curNdcY  = -((midY - rect.top)  / rect.height) * 2 + 1;
+
+    const prevWorld = new THREE.Vector3(prevNdcX, prevNdcY, 0).unproject(camera);
+    const curWorld  = new THREE.Vector3(curNdcX,  curNdcY,  0).unproject(camera);
+    const panDelta  = prevWorld.sub(curWorld);
+    camera.position.add(panDelta);
+    controls.target.add(panDelta);
+
+    // ── Zoom: zoom toward the current midpoint ────────────────────────
+    const factor = newDist / _pinchDist;
+    const before = new THREE.Vector3(curNdcX, curNdcY, 0).unproject(camera);
     camera.zoom = Math.max(0.05, Math.min(200, camera.zoom * factor));
     camera.updateProjectionMatrix();
-    const after = new THREE.Vector3(ndcX, ndcY, 0).unproject(camera);
+    const after = new THREE.Vector3(curNdcX, curNdcY, 0).unproject(camera);
 
-    const delta = before.clone().sub(after);
-    camera.position.add(delta);
-    controls.target.add(delta);
+    const zoomDelta = before.clone().sub(after);
+    camera.position.add(zoomDelta);
+    controls.target.add(zoomDelta);
+
+    _pinchDist = newDist;
+    _pinchMid  = { x: midX, y: midY };
     controls.update();
   }, { passive: false });
 
   renderer.domElement.addEventListener('touchend', (e) => {
     if (e.touches.length < 2) {
       _pinchDist = null;
+      _pinchMid  = null;
       controls.enabled = true;
     }
   });
