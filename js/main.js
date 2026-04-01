@@ -60,13 +60,7 @@ const settings = {
 };
 
 // ── Canvas filter support (Safari / iOS WebView don't support ctx.filter) ────
-const CANVAS_FILTER_SUPPORTED = (() => {
-  try {
-    const ctx = document.createElement('canvas').getContext('2d');
-    ctx.filter = 'blur(1px)';
-    return ctx.filter === 'blur(1px)';
-  } catch (e) { return false; }
-})();
+const CANVAS_FILTER_SUPPORTED = 'filter' in CanvasRenderingContext2D.prototype;
 
 /**
  * Box-blur one row of RGBA pixels (horizontal pass).
