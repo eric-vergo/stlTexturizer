@@ -31,9 +31,10 @@ export function buildAdjacency(geometry) {
   const posAttr  = geometry.attributes.position;
   const triCount = posAttr.count / 3;
 
-  // Pre-allocate face normals and centroids
+  // Pre-allocate face normals, centroids, and per-triangle bounding radii
   const faceNormals = new Float32Array(triCount * 3);
   const centroids   = new Float32Array(triCount * 3);
+  const boundRadii  = new Float32Array(triCount); // max vertex-to-centroid distance
 
   const vA = new THREE.Vector3();
   const vB = new THREE.Vector3();
@@ -56,9 +57,16 @@ export function buildAdjacency(geometry) {
     faceNormals[i + 1] = fn.y;
     faceNormals[i + 2] = fn.z;
 
-    centroids[i]     = (vA.x + vB.x + vC.x) / 3;
-    centroids[i + 1] = (vA.y + vB.y + vC.y) / 3;
-    centroids[i + 2] = (vA.z + vB.z + vC.z) / 3;
+    const cx = (vA.x + vB.x + vC.x) / 3;
+    const cy = (vA.y + vB.y + vC.y) / 3;
+    const cz = (vA.z + vB.z + vC.z) / 3;
+    centroids[i]     = cx;
+    centroids[i + 1] = cy;
+    centroids[i + 2] = cz;
+    const dA = (vA.x-cx)**2 + (vA.y-cy)**2 + (vA.z-cz)**2;
+    const dB = (vB.x-cx)**2 + (vB.y-cy)**2 + (vB.z-cz)**2;
+    const dC = (vC.x-cx)**2 + (vC.y-cy)**2 + (vC.z-cz)**2;
+    boundRadii[t] = Math.sqrt(Math.max(dA, dB, dC));
   }
 
   // Build edge → triangle list (two triangles share an edge iff they share two
@@ -102,7 +110,7 @@ export function buildAdjacency(geometry) {
     adjacency.get(b).push({ neighbor: a, angle: angleDeg });
   }
 
-  return { adjacency, centroids };
+  return { adjacency, centroids, boundRadii };
 }
 
 // ── Bucket fill ───────────────────────────────────────────────────────────────

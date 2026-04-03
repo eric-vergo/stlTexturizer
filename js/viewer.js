@@ -582,7 +582,7 @@ export function setExclusionOverlay(overlayGeo, color = 0xff6600, opacity = 1.0)
  *
  * @param {THREE.BufferGeometry|null} overlayGeo
  */
-export function setHoverPreview(overlayGeo) {
+export function setHoverPreview(overlayGeo, color = 0xffee00) {
   if (hoverMesh) {
     scene.remove(hoverMesh);
     hoverMesh.geometry.dispose();
@@ -593,7 +593,7 @@ export function setHoverPreview(overlayGeo) {
   hoverMesh = new THREE.Mesh(
     overlayGeo,
     new THREE.MeshBasicMaterial({
-      color: 0xffee00,
+      color,
       side: THREE.DoubleSide,
       transparent: true,
       opacity: 0.45,

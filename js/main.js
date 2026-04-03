@@ -27,6 +27,7 @@ let previewDebounce   = null;
 let excludedFaces      = new Set();   // triangle indices in currentGeometry
 let triangleAdjacency  = null;        // Map from buildAdjacency
 let triangleCentroids  = null;        // Float32Array from buildAdjacency
+let triangleBoundRadii = null;        // Float32Array — max vertex-to-centroid dist per tri
 let exclusionTool      = null;        // 'brush' | 'bucket' | null
 let eraseMode          = false;
 let brushIsRadius      = false;
@@ -47,7 +48,7 @@ const settings = {
   offsetV:       0.0,
   rotation:      0,
   refineLength:  1.0,
-  maxTriangles:  1_000_000,
+  maxTriangles:  750_000,
   lockScale:     true,
   bottomAngleLimit: 5,
   topAngleLimit:    0,
@@ -725,6 +726,81 @@ function pickTriangle(e) {
   return fi;
 }
 
+/**
+ * Squared distance from point P to the closest point on triangle ABC.
+ * Uses the Voronoi-region method (no allocations, pure arithmetic).
+ */
+function distSqPointToTri(px, py, pz, ax, ay, az, bx, by, bz, cx, cy, cz) {
+  const abx = bx-ax, aby = by-ay, abz = bz-az;
+  const acx = cx-ax, acy = cy-ay, acz = cz-az;
+  const apx = px-ax, apy = py-ay, apz = pz-az;
+
+  const d1 = abx*apx + aby*apy + abz*apz;
+  const d2 = acx*apx + acy*apy + acz*apz;
+  if (d1 <= 0 && d2 <= 0) return apx*apx + apy*apy + apz*apz; // vertex A
+
+  const bpx = px-bx, bpy = py-by, bpz = pz-bz;
+  const d3 = abx*bpx + aby*bpy + abz*bpz;
+  const d4 = acx*bpx + acy*bpy + acz*bpz;
+  if (d3 >= 0 && d4 <= d3) return bpx*bpx + bpy*bpy + bpz*bpz; // vertex B
+
+  const cpx = px-cx, cpy = py-cy, cpz = pz-cz;
+  const d5 = abx*cpx + aby*cpy + abz*cpz;
+  const d6 = acx*cpx + acy*cpy + acz*cpz;
+  if (d6 >= 0 && d5 <= d6) return cpx*cpx + cpy*cpy + cpz*cpz; // vertex C
+
+  const vc = d1*d4 - d3*d2;
+  if (vc <= 0 && d1 >= 0 && d3 <= 0) { // edge AB
+    const v = d1 / (d1 - d3);
+    const qx = ax+v*abx-px, qy = ay+v*aby-py, qz = az+v*abz-pz;
+    return qx*qx + qy*qy + qz*qz;
+  }
+
+  const vb = d5*d2 - d1*d6;
+  if (vb <= 0 && d2 >= 0 && d6 <= 0) { // edge AC
+    const w = d2 / (d2 - d6);
+    const qx = ax+w*acx-px, qy = ay+w*acy-py, qz = az+w*acz-pz;
+    return qx*qx + qy*qy + qz*qz;
+  }
+
+  const va = d3*d6 - d5*d4;
+  if (va <= 0 && (d4-d3) >= 0 && (d5-d6) >= 0) { // edge BC
+    const w = (d4-d3) / ((d4-d3) + (d5-d6));
+    const qx = bx+w*(cx-bx)-px, qy = by+w*(cy-by)-py, qz = bz+w*(cz-bz)-pz;
+    return qx*qx + qy*qy + qz*qz;
+  }
+
+  // Inside triangle
+  const den = 1 / (va + vb + vc);
+  const v = vb*den, w = vc*den;
+  const qx = ax+abx*v+acx*w-px, qy = ay+aby*v+acy*w-py, qz = az+abz*v+acz*w-pz;
+  return qx*qx + qy*qy + qz*qz;
+}
+
+/** Test all triangles against a sphere and invoke cb(triIdx) for each hit. */
+function forEachTriInSphere(hitPt, r2, cb) {
+  const pos = currentGeometry.attributes.position;
+  const triCount = triangleCentroids.length / 3;
+  const r = Math.sqrt(r2);
+  for (let t = 0; t < triCount; t++) {
+    // Quick reject: centroid distance > brush radius + triangle bounding radius
+    const dx = triangleCentroids[t*3]   - hitPt.x;
+    const dy = triangleCentroids[t*3+1] - hitPt.y;
+    const dz = triangleCentroids[t*3+2] - hitPt.z;
+    const bound = r + triangleBoundRadii[t];
+    if (dx*dx + dy*dy + dz*dz > bound*bound) continue;
+    // Precise sphere-triangle test
+    const i = t * 3;
+    const d2 = distSqPointToTri(
+      hitPt.x, hitPt.y, hitPt.z,
+      pos.getX(i), pos.getY(i), pos.getZ(i),
+      pos.getX(i+1), pos.getY(i+1), pos.getZ(i+1),
+      pos.getX(i+2), pos.getY(i+2), pos.getZ(i+2),
+    );
+    if (d2 <= r2) cb(t);
+  }
+}
+
 function paintAt(e) {
   const mesh = getCurrentMesh();
   if (!mesh) return;
@@ -740,17 +816,10 @@ function paintAt(e) {
   }
 
   if (brushIsRadius) {
-    const hitPt    = hit.point;
-    const triCount = triangleCentroids.length / 3;
     const r2 = brushRadius * brushRadius;
-    for (let t = 0; t < triCount; t++) {
-      const dx = triangleCentroids[t * 3]     - hitPt.x;
-      const dy = triangleCentroids[t * 3 + 1] - hitPt.y;
-      const dz = triangleCentroids[t * 3 + 2] - hitPt.z;
-      if (dx * dx + dy * dy + dz * dz <= r2) {
-        if (eraseMode) excludedFaces.delete(t); else excludedFaces.add(t);
-      }
-    }
+    forEachTriInSphere(hit.point, r2, t => {
+      if (eraseMode) excludedFaces.delete(t); else excludedFaces.add(t);
+    });
   } else {
     if (eraseMode) excludedFaces.delete(triIdx); else excludedFaces.add(triIdx);
   }
@@ -865,7 +934,7 @@ function handlePlaceOnFaceClick(e) {
   // Rebuild adjacency
   const adjData = buildAdjacency(currentGeometry);
   triangleAdjacency = adjData.adjacency;
-  triangleCentroids = adjData.centroids;
+  triangleCentroids = adjData.centroids; triangleBoundRadii = adjData.boundRadii;
 
   // Update edge length for new bounds
   const maxDim = Math.max(currentBounds.size.x, currentBounds.size.y, currentBounds.size.z);
@@ -974,21 +1043,15 @@ function updateBrushHover(e) {
   if (triIdx === _lastHoverTriIdx) return;
   _lastHoverTriIdx = triIdx;
 
+  const hoverColor = eraseMode ? 0x999999 : 0xffee00;
   if (brushIsRadius) {
-    const hitPt = hit.point;
-    const triCount = triangleCentroids.length / 3;
     const r2 = brushRadius * brushRadius;
     const hovered = new Set();
-    for (let t = 0; t < triCount; t++) {
-      const dx = triangleCentroids[t * 3]     - hitPt.x;
-      const dy = triangleCentroids[t * 3 + 1] - hitPt.y;
-      const dz = triangleCentroids[t * 3 + 2] - hitPt.z;
-      if (dx * dx + dy * dy + dz * dz <= r2) hovered.add(t);
-    }
-    setHoverPreview(buildExclusionOverlayGeo(currentGeometry, hovered));
+    forEachTriInSphere(hit.point, r2, t => hovered.add(t));
+    setHoverPreview(buildExclusionOverlayGeo(currentGeometry, hovered), hoverColor);
   } else {
     const hovered = new Set([triIdx]);
-    setHoverPreview(buildExclusionOverlayGeo(currentGeometry, hovered));
+    setHoverPreview(buildExclusionOverlayGeo(currentGeometry, hovered), hoverColor);
   }
 }
 
@@ -1001,7 +1064,7 @@ function updateBucketHover(e) {
     return;
   }
   const hovered = bucketFill(triIdx, triangleAdjacency, bucketThreshold);
-  setHoverPreview(buildExclusionOverlayGeo(currentGeometry, hovered));
+  setHoverPreview(buildExclusionOverlayGeo(currentGeometry, hovered), eraseMode ? 0x999999 : 0xffee00);
 }
 
 // ── Slider helper ─────────────────────────────────────────────────────────────
@@ -1096,7 +1159,7 @@ function loadDefaultCube() {
 
   const adjData = buildAdjacency(geo);
   triangleAdjacency = adjData.adjacency;
-  triangleCentroids = adjData.centroids;
+  triangleCentroids = adjData.centroids; triangleBoundRadii = adjData.boundRadii;
 
   settings.scaleU  = 0.5; scaleUSlider.value = scaleToPos(0.5); scaleUVal.value = 0.5;
   settings.scaleV  = 0.5; scaleVSlider.value = scaleToPos(0.5); scaleVVal.value = 0.5;
@@ -1174,7 +1237,7 @@ async function handleModelFile(file) {
     // typical STL sizes processed by this tool)
     const adjData = buildAdjacency(geometry);
     triangleAdjacency = adjData.adjacency;
-    triangleCentroids = adjData.centroids;
+    triangleCentroids = adjData.centroids; triangleBoundRadii = adjData.boundRadii;
 
     // Reset scale & offset sliders so scale=1 = one tile covers the full bounding box
     const resetVal = (slider, valEl, value) => {
