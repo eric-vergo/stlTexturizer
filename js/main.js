@@ -1,7 +1,8 @@
 import * as THREE from 'three';
 import { initViewer, loadGeometry, setMeshMaterial, setMeshGeometry, setWireframe,
          getControls, getCamera, getCurrentMesh,
-         setExclusionOverlay, setHoverPreview, setViewerTheme } from './viewer.js';
+         setExclusionOverlay, setHoverPreview, setViewerTheme,
+         requestRender } from './viewer.js';
 import { loadModelFile, computeBounds, getTriangleCount }  from './stlLoader.js';
 import { loadPresets, loadCustomTexture }  from './presetTextures.js';
 import { createPreviewMaterial, updateMaterial } from './previewMaterial.js';
@@ -25,7 +26,7 @@ let previewDebounce   = null;
 
 // ── Exclusion state ───────────────────────────────────────────────────────────
 let excludedFaces      = new Set();   // triangle indices in currentGeometry
-let triangleAdjacency  = null;        // Map from buildAdjacency
+let triangleAdjacency  = null;        // Array from buildAdjacency
 let triangleCentroids  = null;        // Float32Array from buildAdjacency
 let triangleBoundRadii = null;        // Float32Array — max vertex-to-centroid dist per tri
 let exclusionTool      = null;        // 'brush' | 'bucket' | null
@@ -38,6 +39,9 @@ let selectionMode      = false;       // false = exclude painted faces; true = i
 let _lastHoverTriIdx   = -1;          // last triangle index used for hover preview
 let placeOnFaceActive  = false;       // true while "Place on Face" mode is active
 const _raycaster       = new THREE.Raycaster();
+let _lastEffectiveTexture = null;
+let _effectiveMapCache    = null;
+let _effectiveMapCacheKey = null;
 
 const settings = {
   mappingMode:   5,     // Triplanar default
@@ -139,7 +143,7 @@ let precisionEdgeLength     = null;   // edge length used for current refinement
 let precisionBusy           = false;  // true while async subdivision is running
 let precisionCentroids      = null;   // Float32Array from buildAdjacency on refined mesh
 let precisionBoundRadii     = null;   // Float32Array — max vertex-to-centroid per refined tri
-let precisionAdjacency      = null;   // Map from buildAdjacency on refined mesh
+let precisionAdjacency      = null;   // Array from buildAdjacency on refined mesh
 let precisionExcludedFaces  = new Set(); // precision face indices excluded while precision is active
 
 // ── Displacement preview state ────────────────────────────────────────────────
@@ -648,23 +652,41 @@ function wireEvents() {
     }
   });
 
+  // RAF-Batching: paint events fire immediately, hover/cursor batched per frame
+  let _pendingHoverEvent = null;
+  let _hoverRafId = 0;
+
   canvas.addEventListener('mousemove', (e) => {
-    if (placeOnFaceActive && currentGeometry) {
-      updatePlaceOnFaceHover(e);
-      return;
-    }
-    if (exclusionTool === 'brush' && brushIsRadius) {
-      updateBrushCursor(e);
-    }
+    // Paint-Events sofort verarbeiten (jeder Event zaehlt fuer lueckenloses Malen)
     if (isPainting && exclusionTool === 'brush') {
       paintAt(e);
+      // Cursor-Update kann warten
+      _pendingHoverEvent = e;
+      if (!_hoverRafId) {
+        _hoverRafId = requestAnimationFrame(() => {
+          _hoverRafId = 0;
+          if (_pendingHoverEvent) updateBrushCursor(_pendingHoverEvent);
+          _pendingHoverEvent = null;
+        });
+      }
       return;
     }
-    if (!isPainting && exclusionTool === 'brush' && currentGeometry) {
-      updateBrushHover(e);
-    }
-    if (!isPainting && exclusionTool === 'bucket' && currentGeometry) {
-      updateBucketHover(e);
+    // Alle anderen Hover-Pfade: RAF-Batching OK
+    _pendingHoverEvent = e;
+    if (!_hoverRafId) {
+      _hoverRafId = requestAnimationFrame(() => {
+        _hoverRafId = 0;
+        const ev = _pendingHoverEvent;
+        if (!ev) return;
+        _pendingHoverEvent = null;
+        if (placeOnFaceActive && currentGeometry) { updatePlaceOnFaceHover(ev); return; }
+        if (exclusionTool === 'brush') {
+          updateBrushCursor(ev);
+          if (brushIsRadius && !isPainting && currentGeometry) updateBrushHover(ev);
+        } else if (exclusionTool === 'bucket' && !isPainting && currentGeometry) {
+          updateBucketHover(ev);
+        }
+      });
     }
   });
 
@@ -748,12 +770,14 @@ function setExclusionTool(tool) {
   }
 }
 
+const _ndcResult = new THREE.Vector2();
 function _canvasNDC(e) {
   const rect = canvas.getBoundingClientRect();
-  return new THREE.Vector2(
+  _ndcResult.set(
     ((e.clientX - rect.left) / rect.width)  *  2 - 1,
     ((e.clientY - rect.top)  / rect.height) * -2 + 1,
   );
+  return _ndcResult;
 }
 
 // The preview material uses THREE.DoubleSide, so the raycaster can return
@@ -1437,7 +1461,11 @@ function updateFaceMask(geometry) {
   if (!geometry) return;
   const posCount = geometry.attributes.position.count;
   const triCount = posCount / 3;
-  const maskArr = new Float32Array(posCount);
+
+  // Reuse existing buffer if length matches exactly, otherwise allocate new
+  const existing = geometry.getAttribute('faceMask');
+  const reuseBuffer = existing && existing.array.length === posCount;
+  const maskArr = reuseBuffer ? existing.array : new Float32Array(posCount);
 
   // Determine which face set to check
   const isPrecision = (geometry === precisionGeometry && precisionMaskingEnabled);
@@ -1461,7 +1489,11 @@ function updateFaceMask(geometry) {
     }
   }
 
-  geometry.setAttribute('faceMask', new THREE.Float32BufferAttribute(maskArr, 1));
+  if (reuseBuffer) {
+    existing.needsUpdate = true;
+  } else {
+    geometry.setAttribute('faceMask', new THREE.Float32BufferAttribute(maskArr, 1));
+  }
 
   // Ensure faceNormal attribute exists (needed by shader for angle masking).
   // For the original geometry normal == faceNormal; for subdivided geometry
@@ -1470,6 +1502,7 @@ function updateFaceMask(geometry) {
   if (!geometry.attributes.faceNormal) {
     addFaceNormals(geometry);
   }
+  requestRender();
 }
 
 /**
@@ -1602,8 +1635,16 @@ function buildParentFaceMap(subdivGeo) {
 }
 
 function getEffectiveMapEntry() {
-  if (!activeMapEntry || settings.textureSmoothing === 0) return activeMapEntry;
-  const { fullCanvas, width, height } = activeMapEntry;
+  if (!activeMapEntry || settings.textureSmoothing === 0) {
+    _effectiveMapCache    = null;
+    _effectiveMapCacheKey = null;
+    return activeMapEntry;
+  }
+  const { fullCanvas, width, height, name } = activeMapEntry;
+  const cacheKey = `${name}_${width}_${height}_${settings.textureSmoothing}`;
+  if (_effectiveMapCacheKey === cacheKey && _effectiveMapCache) {
+    return _effectiveMapCache;
+  }
   // Tile the source 3×3 before blurring so edge pixels have correct
   // neighbours and the blurred centre tile is seamlessly tileable.
   const tiled = document.createElement('canvas');
@@ -1628,7 +1669,11 @@ function getEffectiveMapEntry() {
   const imageData = offscreen.getContext('2d').getImageData(0, 0, width, height);
   const texture   = new THREE.CanvasTexture(offscreen);
   texture.wrapS   = texture.wrapT = THREE.RepeatWrapping;
-  return { ...activeMapEntry, imageData, texture };
+  if (_lastEffectiveTexture) _lastEffectiveTexture.dispose();
+  _lastEffectiveTexture = texture;
+  _effectiveMapCache    = { ...activeMapEntry, imageData, texture };
+  _effectiveMapCacheKey = cacheKey;
+  return _effectiveMapCache;
 }
 
 function updatePreview() {
@@ -1717,19 +1762,28 @@ function addFaceNormals(geometry) {
 function addSmoothNormals(geometry) {
   const pos   = geometry.attributes.position.array;
   const count = geometry.attributes.position.count;
+  const nrm   = geometry.attributes.normal.array;
 
+  // Vertex-dedup pass: assign a numeric ID to each unique quantised position.
   const QUANT = 1e4;
-  const key = (x, y, z) =>
-    `${Math.round(x * QUANT)}_${Math.round(y * QUANT)}_${Math.round(z * QUANT)}`;
+  const dedupMap = new Map();
+  let nextId = 0;
+  const vertId = new Uint32Array(count);
+  for (let i = 0; i < count; i++) {
+    const key = `${Math.round(pos[i*3]*QUANT)}_${Math.round(pos[i*3+1]*QUANT)}_${Math.round(pos[i*3+2]*QUANT)}`;
+    let id = dedupMap.get(key);
+    if (id === undefined) { id = nextId++; dedupMap.set(key, id); }
+    vertId[i] = id;
+  }
 
-  // Accumulate area-weighted buffer normals per unique position.
+  // Accumulate area-weighted buffer normals per unique position into flat arrays.
   // The subdivision pipeline splits indexed vertices at sharp dihedral edges
-  // (>30°) so the interpolated buffer normals are smooth across soft edges
+  // (>30 deg) so the interpolated buffer normals are smooth across soft edges
   // (cylinder, sphere) but sharp across hard edges (cube).  Using these buffer
   // normals instead of geometric face normals eliminates visible faceting steps
   // on round surfaces while still preserving hard edges.
-  const nrmMap = new Map();
-  const nrm = geometry.attributes.normal.array;
+  const uc = nextId;
+  const snx = new Float64Array(uc), sny = new Float64Array(uc), snz = new Float64Array(uc);
   const vA = new THREE.Vector3(), vB = new THREE.Vector3(), vC = new THREE.Vector3();
   const e1 = new THREE.Vector3(), e2 = new THREE.Vector3(), fn = new THREE.Vector3();
 
@@ -1744,32 +1798,24 @@ function addSmoothNormals(geometry) {
     if (area < 1e-12) continue;
     for (let v = 0; v < 3; v++) {
       const vi = i + v;
-      const nx = nrm[vi * 3], ny = nrm[vi * 3 + 1], nz = nrm[vi * 3 + 2];
-      const k = key(pos[vi * 3], pos[vi * 3 + 1], pos[vi * 3 + 2]);
-      const prev = nrmMap.get(k);
-      if (prev) {
-        prev[0] += nx * area;
-        prev[1] += ny * area;
-        prev[2] += nz * area;
-      } else {
-        nrmMap.set(k, [nx * area, ny * area, nz * area]);
-      }
+      const id = vertId[vi];
+      snx[id] += nrm[vi * 3]     * area;
+      sny[id] += nrm[vi * 3 + 1] * area;
+      snz[id] += nrm[vi * 3 + 2] * area;
     }
   }
 
   // Normalize accumulated normals
-  for (const n of nrmMap.values()) {
-    const len = Math.sqrt(n[0] * n[0] + n[1] * n[1] + n[2] * n[2]);
-    if (len > 1e-12) { n[0] /= len; n[1] /= len; n[2] /= len; }
+  for (let id = 0; id < uc; id++) {
+    const len = Math.sqrt(snx[id] * snx[id] + sny[id] * sny[id] + snz[id] * snz[id]) || 1;
+    snx[id] /= len; sny[id] /= len; snz[id] /= len;
   }
 
-  // Write smoothNormal attribute
+  // Write smoothNormal attribute via vertId lookup
   const sn = new Float32Array(count * 3);
   for (let i = 0; i < count; i++) {
-    const k = key(pos[i * 3], pos[i * 3 + 1], pos[i * 3 + 2]);
-    const n = nrmMap.get(k);
-    if (n) { sn[i * 3] = n[0]; sn[i * 3 + 1] = n[1]; sn[i * 3 + 2] = n[2]; }
-    else   { sn[i * 3] = 0; sn[i * 3 + 1] = 0; sn[i * 3 + 2] = 1; }
+    const id = vertId[i];
+    sn[i * 3] = snx[id]; sn[i * 3 + 1] = sny[id]; sn[i * 3 + 2] = snz[id];
   }
   geometry.setAttribute('smoothNormal', new THREE.Float32BufferAttribute(sn, 3));
 }
@@ -2193,26 +2239,30 @@ async function handleExport() {
 
     // Flat-bottom clamp: when bottom faces are masked (bottomAngleLimit > 0),
     // any vertex that ended up below the original model's bottom layer gets
-    // snapped back up to that Z. Only the Z-value is changed.
+    // snapped back up to that Z. Single pass with selective normal recomputation.
     if (settings.bottomAngleLimit > 0) {
       const bottomZ = currentBounds.min.z;
-      const posArr  = finalGeometry.attributes.position.array;
-      for (let i = 2; i < posArr.length; i += 3) {
-        if (posArr[i] < bottomZ) posArr[i] = bottomZ;
-      }
-      finalGeometry.attributes.position.needsUpdate = true;
-      // Recompute normals via cross product so they always match winding order.
       const pa = finalGeometry.attributes.position.array;
       const na = finalGeometry.attributes.normal ? finalGeometry.attributes.normal.array : new Float32Array(pa.length);
+
       for (let i = 0; i < pa.length; i += 9) {
-        const ux = pa[i+3]-pa[i],   uy = pa[i+4]-pa[i+1], uz = pa[i+5]-pa[i+2];
-        const vx = pa[i+6]-pa[i],   vy = pa[i+7]-pa[i+1], vz = pa[i+8]-pa[i+2];
-        const nx = uy*vz-uz*vy, ny = uz*vx-ux*vz, nz = ux*vy-uy*vx;
-        const len = Math.sqrt(nx*nx+ny*ny+nz*nz) || 1;
-        na[i]   = na[i+3] = na[i+6] = nx/len;
-        na[i+1] = na[i+4] = na[i+7] = ny/len;
-        na[i+2] = na[i+5] = na[i+8] = nz/len;
+        let dirty = false;
+        if (pa[i+2] < bottomZ) { pa[i+2] = bottomZ; dirty = true; }
+        if (pa[i+5] < bottomZ) { pa[i+5] = bottomZ; dirty = true; }
+        if (pa[i+8] < bottomZ) { pa[i+8] = bottomZ; dirty = true; }
+
+        if (dirty) {
+          const ux = pa[i+3]-pa[i],   uy = pa[i+4]-pa[i+1], uz = pa[i+5]-pa[i+2];
+          const vx = pa[i+6]-pa[i],   vy = pa[i+7]-pa[i+1], vz = pa[i+8]-pa[i+2];
+          const nx = uy*vz-uz*vy, ny = uz*vx-ux*vz, nz = ux*vy-uy*vx;
+          const len = Math.sqrt(nx*nx+ny*ny+nz*nz) || 1;
+          na[i]   = na[i+3] = na[i+6] = nx/len;
+          na[i+1] = na[i+4] = na[i+7] = ny/len;
+          na[i+2] = na[i+5] = na[i+8] = nz/len;
+        }
       }
+
+      finalGeometry.attributes.position.needsUpdate = true;
       if (!finalGeometry.attributes.normal) finalGeometry.setAttribute('normal', new THREE.Float32BufferAttribute(na, 3));
       else finalGeometry.attributes.normal.needsUpdate = true;
     }
