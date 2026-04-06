@@ -1649,7 +1649,10 @@ function computeBoundaryFalloffAttr(geometry, userMaskArr) {
   for (const [k, pos] of posFromKey) {
     const mf = maskFracMap.get(k);
     const frac = mf[1] > 0 ? mf[0] / mf[1] : 0;
-    if (frac > 0) continue; // masked or boundary vertex — keep 1.0 (mask handles it)
+    if (frac >= 1) continue; // fully masked vertex — keep 1.0 (mask zeroes it anyway)
+    // Boundary vertices (shared between masked and unmasked faces) are AT
+    // the boundary → distance 0 → falloff factor 0.
+    if (frac > 0) { falloffCache.set(k, 0); continue; }
 
     const px = pos[0], py = pos[1], pz = pos[2];
     const cix = Math.max(0, Math.min(gRes - 1, Math.floor((px - gMinX) / gDx)));
