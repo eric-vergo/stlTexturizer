@@ -309,7 +309,13 @@ function populateLanguageSelector() {
   }
 
   select.addEventListener('change', async (e) => {
-    await setLang(e.target.value);
+    const ok = await setLang(e.target.value);
+    if (!ok) {
+      // Revert the dropdown to the language that is actually active
+      select.value = getLang();
+      alert('Could not load the selected language. Please check your connection and try again.');
+      return;
+    }
 
     // Re-translate <option> elements (innerHTML won't reach these)
     document.querySelectorAll('#mapping-mode option[data-i18n-opt]').forEach(opt => {
@@ -327,7 +333,18 @@ function populateLanguageSelector() {
 populateLanguageSelector();
 
 // Initialise language (reads localStorage / browser preference, applies translations)
-await initLang();
+{
+  const { enFailed } = await initLang();
+  if (enFailed) {
+    // English base strings failed — the UI will show raw keys. Surface a plain
+    // English message since t() won't work reliably at this point.
+    console.error('[i18n] English language file failed to load — UI text will be missing');
+    const banner = document.createElement('div');
+    banner.style.cssText = 'position:fixed;top:0;left:0;right:0;z-index:9999;background:#c0392b;color:#fff;padding:10px 16px;font-family:sans-serif;font-size:14px;text-align:center';
+    banner.textContent = 'Warning: language files could not be loaded. The interface may show missing text. Check your network connection and reload the page.';
+    document.body.prepend(banner);
+  }
+}
 
 // Sync lang dropdown to current language
 (function() {
