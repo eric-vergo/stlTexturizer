@@ -12,7 +12,8 @@ const _tmpV2 = new THREE.Vector3();
 const _tmpV3 = new THREE.Vector3();
 const _tmpV4 = new THREE.Vector3();
 
-let renderer, camera, scene, controls, meshGroup, ambientLight, dirLight1, dirLight2, grid;
+let renderer, orthoCamera, perspCamera, camera, scene, controls, meshGroup, ambientLight, dirLight1, dirLight2, grid;
+let _isPerspective = false;
 let currentMesh = null;
 let axesGroup = null;
 let dimensionGroup = null;
@@ -164,11 +165,19 @@ export function initViewer(canvas) {
   grid.position.z = 0;
   scene.add(grid);
 
-  // Camera — orthographic (parallel projection), Z-up
-  camera = new THREE.OrthographicCamera(-150, 150, 150, -150, -10000, 10000);
-  camera.up.set(0, 0, 1);
-  camera.position.set(120, -200, 100);
-  camera.lookAt(0, 0, 0);
+  // Camera — orthographic (parallel projection), Z-up (default)
+  orthoCamera = new THREE.OrthographicCamera(-150, 150, 150, -150, -10000, 10000);
+  orthoCamera.up.set(0, 0, 1);
+  orthoCamera.position.set(120, -200, 100);
+  orthoCamera.lookAt(0, 0, 0);
+
+  // Camera — perspective, Z-up
+  perspCamera = new THREE.PerspectiveCamera(50, 1, 0.1, 20000);
+  perspCamera.up.set(0, 0, 1);
+  perspCamera.position.copy(orthoCamera.position);
+  perspCamera.lookAt(0, 0, 0);
+
+  camera = orthoCamera;
 
   // Lights
   ambientLight = new THREE.AmbientLight(0xffffff, 0.4);
@@ -235,7 +244,9 @@ export function initViewer(canvas) {
 
     // Show marker, sized as ~1.5 % of the visible frustum height
     _pivotMarker.position.copy(_customPivot);
-    const markerScale = (camera.top / camera.zoom) * 0.015;
+    const markerScale = _isPerspective
+      ? _customPivot.distanceTo(camera.position) * Math.tan(THREE.MathUtils.degToRad(perspCamera.fov / 2)) * 0.015
+      : (orthoCamera.top / orthoCamera.zoom) * 0.015;
     _pivotMarker.scale.setScalar(markerScale);
     _pivotMarker.visible = true;
     _needsRender = true;
@@ -249,12 +260,16 @@ export function initViewer(canvas) {
     if (dx === 0 && dy === 0) return;
 
     const rotSpeed = 0.005;
-    // Horizontal: rotate around world Z (up)
-    _tmpQ1.setFromAxisAngle(_tmpV1.set(0, 0, 1), -dx * rotSpeed);
-    // Vertical: rotate around camera's local X (right vector)
-    _tmpV2.setFromMatrixColumn(camera.matrixWorld, 0).normalize();
-    _tmpQ2.setFromAxisAngle(_tmpV2, -dy * rotSpeed);
-    _tmpQ1.premultiply(_tmpQ2); // _tmpQ1 = qV * qH (total rotation)
+
+    // Build a pure quaternion rotation: horizontal around world Z,
+    // vertical around camera's right axis.  No polar clamping — the
+    // camera can orbit freely over the poles.
+    camera.updateMatrixWorld();
+    _tmpV2.setFromMatrixColumn(camera.matrixWorld, 0).normalize(); // camera right
+
+    _tmpQ1.setFromAxisAngle(_tmpV1.set(0, 0, 1), -dx * rotSpeed);   // yaw
+    _tmpQ2.setFromAxisAngle(_tmpV2, -dy * rotSpeed);                  // pitch
+    _tmpQ1.premultiply(_tmpQ2);
 
     // Rotate camera position around the pivot
     _tmpV3.copy(camera.position).sub(_customPivot);
@@ -266,7 +281,9 @@ export function initViewer(canvas) {
     _tmpV4.applyQuaternion(_tmpQ1);
     controls.target.copy(_customPivot).add(_tmpV4);
 
-    camera.lookAt(controls.target);
+    // Rotate camera orientation directly — avoids lookAt pole singularity
+    camera.quaternion.premultiply(_tmpQ1);
+    camera.updateMatrixWorld();
     _needsRender = true;
   });
 
@@ -275,6 +292,9 @@ export function initViewer(canvas) {
       _customPivot  = null;
       _lastPointer  = null;
       controls.enableRotate = true;
+      // Re-sync up vector for OrbitControls
+      camera.up.set(0, 0, 1);
+      camera.lookAt(controls.target);
       _pivotMarker.visible = false;
       _needsRender = true;
     }
@@ -311,22 +331,48 @@ export function initViewer(canvas) {
     const curNdcX  =  ((midX - rect.left) / rect.width)  * 2 - 1;
     const curNdcY  = -((midY - rect.top)  / rect.height) * 2 + 1;
 
-    _tmpV1.set(prevNdcX, prevNdcY, 0).unproject(camera);
-    _tmpV2.set(curNdcX,  curNdcY,  0).unproject(camera);
-    _tmpV1.sub(_tmpV2); // panDelta
-    camera.position.add(_tmpV1);
-    controls.target.add(_tmpV1);
+    if (_isPerspective) {
+      // Pan on the plane through controls.target perpendicular to the view direction
+      const camDir = _tmpV1.copy(controls.target).sub(camera.position).normalize();
+      const plane = new THREE.Plane().setFromNormalAndCoplanarPoint(camDir, controls.target);
+      const ray1 = new THREE.Ray();
+      const ray2 = new THREE.Ray();
+      _tmpV2.set(prevNdcX, prevNdcY, 0.5).unproject(camera);
+      ray1.set(camera.position, _tmpV2.sub(camera.position).normalize());
+      _tmpV3.set(curNdcX, curNdcY, 0.5).unproject(camera);
+      ray2.set(camera.position, _tmpV3.sub(camera.position).normalize());
+      const p1 = new THREE.Vector3(), p2 = new THREE.Vector3();
+      if (ray1.intersectPlane(plane, p1) && ray2.intersectPlane(plane, p2)) {
+        _tmpV4.subVectors(p1, p2);
+        camera.position.add(_tmpV4);
+        controls.target.add(_tmpV4);
+      }
+    } else {
+      _tmpV1.set(prevNdcX, prevNdcY, 0).unproject(camera);
+      _tmpV2.set(curNdcX,  curNdcY,  0).unproject(camera);
+      _tmpV1.sub(_tmpV2); // panDelta
+      camera.position.add(_tmpV1);
+      controls.target.add(_tmpV1);
+    }
 
     // ── Zoom: zoom toward the current midpoint ────────────────────────
     const factor = newDist / _pinchDist;
-    _tmpV3.set(curNdcX, curNdcY, 0).unproject(camera);
-    camera.zoom = Math.max(0.05, Math.min(200, camera.zoom * factor));
-    camera.updateProjectionMatrix();
-    _tmpV4.set(curNdcX, curNdcY, 0).unproject(camera);
-
-    _tmpV3.sub(_tmpV4); // zoomDelta
-    camera.position.add(_tmpV3);
-    controls.target.add(_tmpV3);
+    if (_isPerspective) {
+      _tmpV3.set(curNdcX, curNdcY, 0.5).unproject(camera);
+      _tmpV3.sub(camera.position).normalize();
+      const dist = camera.position.distanceTo(controls.target);
+      const dolly = dist * (1 - 1 / factor);
+      camera.position.addScaledVector(_tmpV3, dolly);
+      controls.target.addScaledVector(_tmpV3, dolly);
+    } else {
+      _tmpV3.set(curNdcX, curNdcY, 0).unproject(camera);
+      camera.zoom = Math.max(0.05, Math.min(200, camera.zoom * factor));
+      camera.updateProjectionMatrix();
+      _tmpV4.set(curNdcX, curNdcY, 0).unproject(camera);
+      _tmpV3.sub(_tmpV4); // zoomDelta
+      camera.position.add(_tmpV3);
+      controls.target.add(_tmpV3);
+    }
 
     _pinchDist = newDist;
     _pinchMid  = { x: midX, y: midY };
@@ -349,22 +395,28 @@ export function initViewer(canvas) {
     const ndcX =  ((e.clientX - rect.left) / rect.width)  * 2 - 1;
     const ndcY = -((e.clientY - rect.top)  / rect.height) * 2 + 1;
 
-    // World position under cursor before zoom
-    _tmpV1.set(ndcX, ndcY, 0).unproject(camera);
-
-    // Apply zoom
-    const factor = e.deltaY > 0 ? 1 / 1.1 : 1.1;
-    camera.zoom = Math.max(0.05, Math.min(200, camera.zoom * factor));
-    camera.updateProjectionMatrix();
-
-    // World position under cursor after zoom
-    _tmpV2.set(ndcX, ndcY, 0).unproject(camera);
-
-    // Shift camera + target so the world point stays under the cursor
-    _tmpV1.sub(_tmpV2); // delta = before - after
-    camera.position.add(_tmpV1);
-    controls.target.add(_tmpV1);
-    controls.update();
+    if (_isPerspective) {
+      // Perspective: dolly camera toward/away from point under cursor
+      const factor = e.deltaY > 0 ? 0.9 : 1.1;
+      _tmpV1.set(ndcX, ndcY, 0.5).unproject(camera);
+      _tmpV1.sub(camera.position).normalize();
+      const dist = camera.position.distanceTo(controls.target);
+      const dolly = dist * (1 - 1 / factor);
+      camera.position.addScaledVector(_tmpV1, dolly);
+      controls.target.addScaledVector(_tmpV1, dolly);
+      controls.update();
+    } else {
+      // Orthographic: cursor-centric zoom via frustum zoom
+      _tmpV1.set(ndcX, ndcY, 0).unproject(camera);
+      const factor = e.deltaY > 0 ? 1 / 1.1 : 1.1;
+      camera.zoom = Math.max(0.05, Math.min(200, camera.zoom * factor));
+      camera.updateProjectionMatrix();
+      _tmpV2.set(ndcX, ndcY, 0).unproject(camera);
+      _tmpV1.sub(_tmpV2);
+      camera.position.add(_tmpV1);
+      controls.target.add(_tmpV1);
+      controls.update();
+    }
   }, { passive: false });
 
   // Resize observer
@@ -391,12 +443,14 @@ function onResize() {
   const w = el.clientWidth;
   const h = el.clientHeight;
   renderer.setSize(w, h, false);
-  // Orthographic: keep the frustum half-height, update left/right for new aspect
   const aspect = w / h;
-  const halfH = camera.top;
-  camera.left   = -halfH * aspect;
-  camera.right  =  halfH * aspect;
-  camera.updateProjectionMatrix();
+  // Update both cameras so switching stays seamless
+  const halfH = orthoCamera.top;
+  orthoCamera.left   = -halfH * aspect;
+  orthoCamera.right  =  halfH * aspect;
+  orthoCamera.updateProjectionMatrix();
+  perspCamera.aspect = aspect;
+  perspCamera.updateProjectionMatrix();
   // LineMaterial needs the actual pixel resolution to compute linewidth correctly
   if (wireframeLines) {
     wireframeLines.material.resolution.set(
@@ -531,21 +585,38 @@ function fitCamera(sphere) {
   const aspect = sz.x / sz.y;
   const halfH = sphere.radius * 1.4;
 
-  camera.left   = -halfH * aspect;
-  camera.right  =  halfH * aspect;
-  camera.top    =  halfH;
-  camera.bottom = -halfH;
-  camera.near   = -sphere.radius * 200;
-  camera.far    =  sphere.radius * 200;
-  camera.zoom   = 1;
-  camera.updateProjectionMatrix();
+  // Orthographic frustum
+  orthoCamera.left   = -halfH * aspect;
+  orthoCamera.right  =  halfH * aspect;
+  orthoCamera.top    =  halfH;
+  orthoCamera.bottom = -halfH;
+  orthoCamera.near   = -sphere.radius * 200;
+  orthoCamera.far    =  sphere.radius * 200;
+  orthoCamera.zoom   = 1;
+  orthoCamera.updateProjectionMatrix();
+
+  // Perspective frustum
+  perspCamera.aspect = aspect;
+  perspCamera.near   = sphere.radius * 0.01;
+  perspCamera.far    = sphere.radius * 400;
+  perspCamera.updateProjectionMatrix();
 
   // Isometric-ish view from front-right-above in Z-up space
   const dir = new THREE.Vector3(0.6, -1.2, 0.8).normalize();
   controls.target.copy(sphere.center);
-  camera.position.copy(sphere.center).addScaledVector(dir, halfH * 4);
-  camera.up.set(0, 0, 1);
-  camera.lookAt(sphere.center);
+
+  // Ortho: position doesn't affect rendered size, just direction
+  orthoCamera.position.copy(sphere.center).addScaledVector(dir, halfH * 4);
+  orthoCamera.up.set(0, 0, 1);
+  orthoCamera.lookAt(sphere.center);
+
+  // Perspective: place far enough so the sphere fills the view
+  const fovRad = THREE.MathUtils.degToRad(perspCamera.fov / 2);
+  const perspDist = halfH / Math.tan(fovRad);
+  perspCamera.position.copy(sphere.center).addScaledVector(dir, perspDist);
+  perspCamera.up.set(0, 0, 1);
+  perspCamera.lookAt(sphere.center);
+
   controls.update();
 }
 
@@ -556,6 +627,49 @@ export function getCamera()    { return camera; }
 export function getScene()     { return scene; }
 export function getControls()  { return controls; }
 export function getCurrentMesh() { return currentMesh; }
+
+/**
+ * Switch between orthographic and perspective projection.
+ * Syncs position, target and up so the view doesn't jump.
+ * @param {boolean} perspective – true for perspective, false for orthographic
+ */
+export function setProjection(perspective) {
+  if (perspective === _isPerspective) return;
+  _isPerspective = perspective;
+  const oldCam = camera;
+  const newCam = perspective ? perspCamera : orthoCamera;
+
+  // Copy spatial state so the view doesn't jump
+  newCam.position.copy(oldCam.position);
+  newCam.up.copy(oldCam.up);
+  newCam.quaternion.copy(oldCam.quaternion);
+
+  if (perspective) {
+    // Estimate a reasonable distance if ortho camera was at an arbitrary depth
+    // Use the ortho frustum half-height divided by tan(fov/2) as reference dist
+    const halfH = orthoCamera.top / orthoCamera.zoom;
+    const fovRad = THREE.MathUtils.degToRad(perspCamera.fov / 2);
+    const dist = halfH / Math.tan(fovRad);
+    const dir = new THREE.Vector3().subVectors(oldCam.position, controls.target).normalize();
+    newCam.position.copy(controls.target).addScaledVector(dir, dist);
+  }
+
+  camera = newCam;
+  controls.object = camera;
+  const sz = renderer.getSize(new THREE.Vector2());
+  const aspect = sz.x / sz.y;
+  if (perspective) {
+    perspCamera.aspect = aspect;
+  } else {
+    const halfH = orthoCamera.top;
+    orthoCamera.left  = -halfH * aspect;
+    orthoCamera.right =  halfH * aspect;
+    orthoCamera.zoom  = 1;
+  }
+  camera.updateProjectionMatrix();
+  controls.update();
+  requestRender();
+}
 
 export function setSceneBackground(hexColor) {
   if (scene) scene.background = new THREE.Color(hexColor);

@@ -31,7 +31,7 @@
   <header>
     <div class="logo">
       <img src="logo.png" alt="BumpMesh" width="24" height="24" />
-      <span>BumpMesh <small style="opacity:.6;font-weight:400">by CNC Kitchen</small></span>
+      <span>BumpMesh <small style="opacity:.6;font-weight:400">by <a href="https://www.youtube.com/@CNCKitchen" target="_blank" rel="noopener noreferrer" style="color:inherit;text-decoration:underline">CNC Kitchen</a></small></span>
     </div>
     <div class="header-actions">
       <div class="lang-seg">
@@ -76,6 +76,10 @@
           <input type="checkbox" id="wireframe-toggle" />
           <span data-i18n="ui.wireframe">Wireframe</span>
         </label>
+        <label class="wireframe-toggle">
+          <input type="checkbox" id="projection-toggle" />
+          <span data-i18n="ui.perspective">Perspective View</span>
+        </label>
 
         <div class="viewport-controls-hint" data-i18n="ui.controlsHint">Left drag: orbit &nbsp;·&nbsp; Right drag: pan &nbsp;·&nbsp; Scroll: zoom</div>
       </div>
@@ -96,6 +100,7 @@
             <span data-i18n="ui.placeOnFace">Place on Face</span>
           </button>
         </div>
+        <p style="margin:.4em 0 0;font-size:.75rem;opacity:.55;text-align:center;" data-i18n="ui.localProcessingNote">All processing runs locally in your browser — no data is uploaded.</p>
       </section>
 
       <!-- Displacement Map -->

@@ -2,7 +2,7 @@ import * as THREE from 'three';
 import { initViewer, loadGeometry, setMeshMaterial, setMeshGeometry, setWireframe,
          getControls, getCamera, getCurrentMesh,
          setExclusionOverlay, setHoverPreview, setViewerTheme,
-         requestRender } from './viewer.js';
+         setProjection, requestRender } from './viewer.js';
 import { loadModelFile, computeBounds, getTriangleCount }  from './stlLoader.js';
 import { loadPresets, loadCustomTexture }  from './presetTextures.js';
 import { createPreviewMaterial, updateMaterial } from './previewMaterial.js';
@@ -178,6 +178,7 @@ const exportProgPct    = document.getElementById('export-progress-pct');
 const exportProgLbl    = document.getElementById('export-progress-label');
 const triLimitWarning  = document.getElementById('tri-limit-warning');
 const wireframeToggle  = document.getElementById('wireframe-toggle');
+const projectionToggle = document.getElementById('projection-toggle');
 const placeOnFaceBtn   = document.getElementById('place-on-face-btn');
 
 const mappingSelect   = document.getElementById('mapping-mode');
@@ -579,6 +580,9 @@ function wireEvents() {
 
   // ── Wireframe ──
   wireframeToggle.addEventListener('change', () => setWireframe(wireframeToggle.checked));
+
+  // ── Projection toggle ──
+  projectionToggle.addEventListener('change', () => setProjection(projectionToggle.checked));
 
   // ── Exclusion tool wiring ─────────────────────────────────────────────────
 
