@@ -1054,6 +1054,11 @@ input[type="number"].val:focus { outline: none; border-color: var(--accent); }
 }
 .sponsor-link--paypal:hover { background: #007bb5; }
 
+.sponsor-link--kofi {
+  background: #ff5e5b;
+}
+.sponsor-link--kofi:hover { background: #e04e4b; }
+
 .sponsor-no-show {
   display: flex;
   align-items: center;
