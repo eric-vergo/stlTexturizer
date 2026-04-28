@@ -220,5 +220,7 @@ export default {
   "color.baseColor": "Base color (untextured / excluded faces)",
   "alerts.colorImageFailed": "Could not load color image: {msg}",
   "progress.bakingColor": "Baking color…",
+  "color.paletteSize": "Export colors",
+  "tooltips.colorPaletteSize": "How many distinct colors the exported 3MF contains. Slicers map these to filament slots; pick the number you actually plan to print with.",
   "tooltips.colorExportEnabled": "When on, exported 3MF includes a colorgroup. STL stays geometry-only. Slicers map colors to filament slots."
 };

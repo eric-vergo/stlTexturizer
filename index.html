@@ -528,6 +528,23 @@
           </label>
         </div>
 
+        <!-- Palette size — caps the colorgroup so slicers don't see 32 distinct
+             filament slots when the user only wants 4. -->
+        <div class="form-row palette-size-row">
+          <label for="color-palette-size" data-i18n="color.paletteSize"
+                 data-i18n-title="tooltips.colorPaletteSize"
+                 title="How many distinct colors the exported 3MF contains. Slicers map these to filament slots; pick the number you actually plan to print with.">Export colors</label>
+          <select id="color-palette-size">
+            <option value="2">2</option>
+            <option value="3">3</option>
+            <option value="4" selected>4</option>
+            <option value="6">6</option>
+            <option value="8">8</option>
+            <option value="16">16</option>
+            <option value="32">32</option>
+          </select>
+        </div>
+
         <!-- Auto color source -->
         <h3 class="panel-subsection-heading" data-i18n="color.sourceLabel">Auto color source</h3>
         <div class="color-source-row">

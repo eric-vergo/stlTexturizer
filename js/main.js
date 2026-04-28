@@ -105,6 +105,10 @@ const settings = {
   colorExportEnabled:   false,
   colorAutoSource:      'none',         // 'none' | 'gradient' | 'image'
   colorBaseColor:       '#ffffff',      // applied to non-textured / excluded faces
+  // Number of distinct palette entries in the exported 3MF. Caps median-cut so
+  // slicers don't see N=32 filament slots when the user only has e.g. 4. The
+  // dropdown in the UI offers 2/3/4/6/8/16/32; default 4 matches typical AMS.
+  colorPaletteSize:     4,
   // N-stop gradient: array of { pos: 0..1, color: '#RRGGBB' } sorted by pos.
   // Two stops minimum, enforced by the gradient editor widget.
   colorGradientStops: [
@@ -1778,6 +1782,17 @@ function wireColorExportUI() {
   if (baseEl) {
     baseEl.value = settings.colorBaseColor;
     baseEl.addEventListener('change', () => { settings.colorBaseColor = baseEl.value; });
+  }
+
+  // 4b) Palette size selector — controls how many distinct colors land in the
+  // 3MF colorgroup, so the slicer maps to a sane number of filament slots.
+  const paletteSizeEl = document.getElementById('color-palette-size');
+  if (paletteSizeEl) {
+    paletteSizeEl.value = String(settings.colorPaletteSize);
+    paletteSizeEl.addEventListener('change', () => {
+      const n = parseInt(paletteSizeEl.value, 10);
+      if (Number.isFinite(n) && n >= 2 && n <= 32) settings.colorPaletteSize = n;
+    });
   }
 
   // 5) Color image upload.
@@ -4453,7 +4468,8 @@ async function handleExport(format = 'stl') {
           triRGB[i * 3 + 2] = Math.round(Math.max(0, Math.min(1, b)) * 255);
         }
         try {
-          const { palette, indices } = medianCut(triRGB, 32);
+          const paletteCap = Math.max(2, Math.min(32, +settings.colorPaletteSize || 4));
+          const { palette, indices } = medianCut(triRGB, paletteCap);
           exportOpts = { palette, triPaletteIndices: indices };
         } catch (err) {
           console.warn('Quantization failed; exporting without color:', err);
@@ -4827,6 +4843,7 @@ const PERSISTED_KEYS = [
   // sessionStorage (would blow the 5MB quota). `_lastColorMap` holds the
   // runtime cache.
   'colorExportEnabled', 'colorAutoSource', 'colorBaseColor', 'colorGradientStops',
+  'colorPaletteSize',
 ];
 
 function getSettingsSnapshot() {
@@ -4964,6 +4981,14 @@ function applySettingsSnapshot(snap) {
       window._gradientEditor.setStops(settings.colorGradientStops);
     }
   }
+  if ('colorPaletteSize' in snap) {
+    const n = +snap.colorPaletteSize | 0;
+    if (n >= 2 && n <= 32) {
+      settings.colorPaletteSize = n;
+      const el = document.getElementById('color-palette-size');
+      if (el) { el.value = String(n); el.dispatchEvent(new Event('change', { bubbles: true })); }
+    }
+  }
 }
 
 /**
@@ -5043,6 +5068,7 @@ const DEFAULT_SETTINGS_SNAPSHOT = Object.freeze({
     { pos: 0, color: '#222222' },
     { pos: 1, color: '#dddddd' },
   ],
+  colorPaletteSize: 4,
   activeMapName: DEFAULT_PRESET_NAME,
 });
 
