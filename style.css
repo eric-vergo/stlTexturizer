@@ -1720,3 +1720,192 @@ input[type="number"].val:focus { outline: none; border-color: var(--accent); }
   border-color: var(--accent);
   color: var(--text);
 }
+
+/* ── Color export section (Unit D) ───────────────────────────────────── */
+#color-section .color-source-row {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-bottom: 10px;
+}
+
+#color-section .color-source-radio {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: var(--text);
+  cursor: pointer;
+}
+
+#color-section .color-source-radio input[type="radio"] {
+  accent-color: var(--accent);
+  margin: 0;
+}
+
+/* CSS-driven sub-section visibility (data-source attribute is wired in
+   js/gradientEditor.js → wireColorSectionVisibility). */
+#color-section[data-source="none"]    .gradient-sub,
+#color-section[data-source="none"]    .image-sub,
+#color-section[data-source="gradient"] .image-sub,
+#color-section[data-source="image"]    .gradient-sub {
+  display: none;
+}
+
+#color-section .color-sub {
+  margin: 8px 0 12px;
+  padding: 8px;
+  background: var(--surface2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+}
+
+#color-section .color-hint {
+  margin-top: 6px;
+  font-size: 11px;
+  color: var(--text-muted);
+  line-height: 1.4;
+}
+
+#color-section .color-image-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+#color-section .color-image-thumb {
+  width: 64px;
+  height: 64px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background:
+    repeating-conic-gradient(var(--surface) 0% 25%, var(--bg) 0% 50%) 50% / 12px 12px;
+  flex-shrink: 0;
+}
+
+#color-section .color-image-buttons {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+#color-section .color-picker-row label {
+  flex: 1;
+}
+
+#color-section .color-picker-row input[type="color"] {
+  width: 32px;
+  height: 24px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: transparent;
+  cursor: pointer;
+  padding: 0;
+  flex-shrink: 0;
+}
+
+#color-section .color-paint-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 6px;
+}
+
+#color-section .color-paint-row input[type="color"] {
+  width: 32px;
+  height: 28px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: transparent;
+  cursor: pointer;
+  padding: 0;
+  flex-shrink: 0;
+}
+
+#color-section #color-paint-toggle {
+  flex: 0 0 auto;
+}
+
+#color-section #color-paint-toggle.active {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+/* ── Gradient editor widget ──────────────────────────────────────────── */
+.gradient-editor {
+  width: 100%;
+}
+
+.gradient-editor-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.gradient-bar-wrap {
+  position: relative;
+  flex: 1;
+  min-width: 120px;
+  padding-bottom: 18px; /* room for stop handles below the bar */
+}
+
+.gradient-bar {
+  position: relative;
+  width: 100%;
+  height: 24px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: linear-gradient(to right, #222 0%, #ddd 100%);
+  cursor: copy;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+.gradient-stops-layer {
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 26px;
+  height: 16px;
+  pointer-events: none; /* handles re-enable individually */
+}
+
+.gradient-stop-handle {
+  position: absolute;
+  top: 0;
+  width: 16px;
+  height: 16px;
+  margin-left: -8px;            /* center the handle on its position */
+  border: 2px solid var(--surface);
+  outline: 1px solid var(--border);
+  border-radius: 50%;
+  cursor: grab;
+  pointer-events: auto;
+  transition: transform 0.1s, outline-color 0.15s;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.3);
+}
+
+.gradient-stop-handle:hover {
+  transform: scale(1.15);
+}
+
+.gradient-stop-handle.selected {
+  outline: 2px solid var(--accent);
+  z-index: 2;
+}
+
+.gradient-stop-handle.drag-remove {
+  opacity: 0.35;
+  transform: scale(0.85);
+}
+
+.gradient-stop-color-input {
+  width: 32px;
+  height: 28px;
+  padding: 0;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: transparent;
+  cursor: pointer;
+  flex-shrink: 0;
+}
