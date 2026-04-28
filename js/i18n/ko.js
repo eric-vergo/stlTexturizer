@@ -206,5 +206,25 @@ export default {
   "ui.cylinderPanelLabel": "원통 투영 정의",
   "ui.cylinderNoModel1": "모델을 불러와",
   "ui.cylinderNoModel2": "원통 축을 배치하세요",
-  "ui.cylinderPanelMinimize": "최소화 / 복원"
+  "ui.cylinderPanelMinimize": "최소화 / 복원",
+
+  // Color export — English fallback strings; native Korean translation TBD.
+  "color.heading": "Color export (3MF)",
+  "color.enable": "Enable color export",
+  "color.sourceLabel": "Auto color source",
+  "color.sourceNone": "None",
+  "color.sourceGradient": "Gradient (height-based)",
+  "color.sourceImage": "Color image",
+  "color.gradientHint": "Click bar to add stop. Right-click to remove. Drag to move.",
+  "color.imageUpload": "Upload color image…",
+  "color.imageRemove": "Remove",
+  "color.imageReplace": "Replace…",
+  "color.baseColor": "Base color (untextured / excluded faces)",
+  "color.paintMode": "Paint color",
+  "color.paintColor": "Active paint color",
+  "color.paintHint": "Click & drag to paint. Hold Shift to erase. Click 'Clear' to reset.",
+  "color.paintClear": "Clear painted colors",
+  "alerts.colorImageFailed": "Could not load color image: {msg}",
+  "progress.bakingColor": "Baking color…",
+  "tooltips.colorExportEnabled": "When on, exported 3MF includes a colorgroup. STL stays geometry-only. Slicers map colors to filament slots."
 };
