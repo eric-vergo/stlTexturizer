@@ -111,8 +111,14 @@ const settings = {
   // Number of distinct palette entries in the exported 3MF. Caps median-cut so
   // slicers don't see N=32 filament slots when the user only has e.g. 4. The
   // dropdown in the UI offers 2/3/4/6/8/16/32; default 4 matches typical AMS.
+  // Only used when colorAutoSource === 'image' (gradient mode snaps to
+  // control points and ignores this).
   colorPaletteSize:     4,
-  // N-stop gradient: array of { pos: 0..1, color: '#RRGGBB' } sorted by pos.
+  // When true, the live preview's gradient LUT is built as a stepped
+  // (per-stop) palette instead of a smooth interpolation, so the on-screen
+  // tint matches what the snap-to-control-points export will produce.
+  colorSnapPreview:     false,
+  // N-stop gradient: array of { pos: 0..1, color: '#RRGGBB', lockedToBase: bool }.
   // Two stops minimum, enforced by the gradient editor widget.
   colorGradientStops: [
     { pos: 0, color: '#222222' },
@@ -1752,16 +1758,70 @@ function wireColorExportUI() {
       editor.setStops(settings.colorGradientStops);
       editor.onChange((stops) => {
         // Deep-copy on assign so settings never aliases the editor's internal array.
-        settings.colorGradientStops = stops.map(s => ({ pos: s.pos, color: s.color }));
+        settings.colorGradientStops = stops.map(s => ({
+          pos: s.pos, color: s.color, lockedToBase: !!s.lockedToBase,
+        }));
+        _refreshStopPropsPanel();
+        _refreshPalettePreview();
         _pushColorPreviewState();
         _scheduleUndoCapture();
         const sp = document.getElementById('settings-panel');
         if (sp) sp.dispatchEvent(new Event('change', { bubbles: true }));
       });
+      editor.onSelect(() => _refreshStopPropsPanel());
       window._gradientEditor = editor;
     } catch (err) {
       console.warn('GradientEditor failed to mount:', err);
     }
+  }
+
+  // 1b) Stop properties panel — drives the currently-selected stop.
+  const stopColorEl  = document.getElementById('stop-color-input');
+  const stopHexEl    = document.getElementById('stop-hex-input');
+  const stopPosEl    = document.getElementById('stop-pos-input');
+  const stopLockEl   = document.getElementById('stop-lock-input');
+  const stopRemoveEl = document.getElementById('stop-remove-btn');
+  if (stopColorEl) stopColorEl.addEventListener('input', () => {
+    if (window._gradientEditor) window._gradientEditor.setSelectedColor(stopColorEl.value);
+  });
+  if (stopHexEl) stopHexEl.addEventListener('change', () => {
+    let v = (stopHexEl.value || '').trim();
+    if (!v.startsWith('#')) v = '#' + v;
+    if (/^#[0-9a-fA-F]{6}$/.test(v) && window._gradientEditor) {
+      window._gradientEditor.setSelectedColor(v.toLowerCase());
+    } else {
+      _refreshStopPropsPanel(); // revert to current value
+    }
+  });
+  if (stopPosEl) stopPosEl.addEventListener('change', () => {
+    const n = parseFloat(stopPosEl.value);
+    if (Number.isFinite(n) && window._gradientEditor) {
+      window._gradientEditor.setSelectedPos(Math.max(0, Math.min(100, n)) / 100);
+    }
+  });
+  if (stopLockEl) stopLockEl.addEventListener('change', () => {
+    if (window._gradientEditor) window._gradientEditor.setSelectedLocked(stopLockEl.checked);
+  });
+  if (stopRemoveEl) stopRemoveEl.addEventListener('click', () => {
+    if (window._gradientEditor) window._gradientEditor.removeSelected();
+  });
+
+  // 1c) Snap-preview toggle.
+  const snapEl = document.getElementById('color-snap-preview');
+  if (snapEl) {
+    snapEl.checked = !!settings.colorSnapPreview;
+    snapEl.addEventListener('change', () => {
+      settings.colorSnapPreview = !!snapEl.checked;
+      _pushColorPreviewState();
+    });
+  }
+
+  // 1d) Reset gradient button.
+  const resetEl = document.getElementById('color-gradient-reset');
+  if (resetEl) {
+    resetEl.addEventListener('click', () => {
+      if (window._gradientEditor) window._gradientEditor.resetToDefault();
+    });
   }
 
   // 2) Master enable toggle.
@@ -1861,8 +1921,15 @@ function wireColorExportUI() {
   // and .bumpmesh import paths.
   window._refreshColorImageUI = refreshColorImageUI;
   refreshColorImageUI();
-  // Initial uniform sync — runs once after the gradient editor mounts and
-  // settings are populated. Subsequent changes flow through the listeners above.
+  // Wire base-color and source changes to the palette preview too.
+  if (baseEl) baseEl.addEventListener('change', _refreshPalettePreview);
+  document.querySelectorAll('input[name="color-auto-source"]').forEach(el => {
+    el.addEventListener('change', _refreshPalettePreview);
+  });
+  // Initial sync — runs once after the gradient editor mounts and settings
+  // are populated. Subsequent changes flow through the listeners above.
+  _refreshStopPropsPanel();
+  _refreshPalettePreview();
   _pushColorPreviewState();
 }
 
@@ -1878,21 +1945,50 @@ function _rebuildGradientLUT() {
   const stops = (Array.isArray(settings.colorGradientStops) && settings.colorGradientStops.length >= 2)
     ? settings.colorGradientStops.slice().sort((a, b) => a.pos - b.pos)
     : [{ pos: 0, color: '#222222' }, { pos: 1, color: '#dddddd' }];
-  const grad = ctx.createLinearGradient(0, 0, 256, 0);
-  for (const s of stops) {
-    const p = Math.max(0, Math.min(1, +s.pos));
-    grad.addColorStop(p, s.color);
+
+  if (settings.colorSnapPreview) {
+    // Stepped LUT: each pixel takes the color of the nearest stop by pos.
+    // This produces the same visual the export will see, so the live preview
+    // matches the printed result exactly (no smooth interpolation between
+    // stops that won't appear in the colorgroup).
+    const img = ctx.createImageData(256, 1);
+    for (let x = 0; x < 256; x++) {
+      const t = x / 255;
+      let best = stops[0];
+      let bestD = Math.abs(stops[0].pos - t);
+      for (let i = 1; i < stops.length; i++) {
+        const d = Math.abs(stops[i].pos - t);
+        if (d < bestD) { bestD = d; best = stops[i]; }
+      }
+      const rgb = _hexToRGB01(best.color);
+      img.data[x * 4]     = Math.round(rgb[0] * 255);
+      img.data[x * 4 + 1] = Math.round(rgb[1] * 255);
+      img.data[x * 4 + 2] = Math.round(rgb[2] * 255);
+      img.data[x * 4 + 3] = 255;
+    }
+    ctx.putImageData(img, 0, 0);
+  } else {
+    // Smooth interpolation via Canvas2D's built-in gradient.
+    const grad = ctx.createLinearGradient(0, 0, 256, 0);
+    for (const s of stops) {
+      const p = Math.max(0, Math.min(1, +s.pos));
+      grad.addColorStop(p, s.color);
+    }
+    ctx.fillStyle = grad;
+    ctx.fillRect(0, 0, 256, 1);
   }
-  ctx.fillStyle = grad;
-  ctx.fillRect(0, 0, 256, 1);
+
   if (!_gradientLUTTexture) {
     _gradientLUTTexture = new THREE.CanvasTexture(_gradientLUTCanvas);
-    _gradientLUTTexture.minFilter = THREE.LinearFilter;
-    _gradientLUTTexture.magFilter = THREE.LinearFilter;
     _gradientLUTTexture.wrapS = _gradientLUTTexture.wrapT = THREE.ClampToEdgeWrapping;
   } else {
     _gradientLUTTexture.needsUpdate = true;
   }
+  // Use NearestFilter when snapped so adjacent stop boundaries stay crisp;
+  // LinearFilter for smooth so the interpolation isn't visibly stepped.
+  const filter = settings.colorSnapPreview ? THREE.NearestFilter : THREE.LinearFilter;
+  _gradientLUTTexture.minFilter = filter;
+  _gradientLUTTexture.magFilter = filter;
   return _gradientLUTTexture;
 }
 
@@ -1971,6 +2067,72 @@ function _snapToControlPoints(triRGB, s) {
     palette[i * 3 + 2] = palRGB[i][2];
   }
   return { palette, triPaletteIndices: indices };
+}
+
+// Refresh the stop-properties panel inputs to match the currently-selected
+// gradient stop. Called by the gradient editor's onSelect / onChange callbacks
+// so the panel always reflects the live state without manual sync code.
+function _refreshStopPropsPanel() {
+  const ge = window._gradientEditor;
+  if (!ge) return;
+  const stop = ge.getSelectedStop();
+  const colorEl  = document.getElementById('stop-color-input');
+  const hexEl    = document.getElementById('stop-hex-input');
+  const posEl    = document.getElementById('stop-pos-input');
+  const lockEl   = document.getElementById('stop-lock-input');
+  const removeEl = document.getElementById('stop-remove-btn');
+  const panel    = document.getElementById('color-stop-props');
+  if (!stop) {
+    if (panel) panel.classList.add('disabled');
+    return;
+  }
+  if (panel) panel.classList.remove('disabled');
+  if (colorEl) colorEl.value = stop.color;
+  if (hexEl)   hexEl.value   = stop.color;
+  if (posEl)   posEl.value   = String(Math.round(stop.pos * 100));
+  if (lockEl)  lockEl.checked = !!stop.lockedToBase;
+  // Color picker is greyed out when locked — clearer than letting the user
+  // edit and silently auto-unlock.
+  if (colorEl) colorEl.disabled = !!stop.lockedToBase;
+  if (hexEl)   hexEl.disabled   = !!stop.lockedToBase;
+  // Disable Remove if we'd drop below the 2-stop minimum.
+  if (removeEl) removeEl.disabled = (ge.getStops().length <= 2);
+}
+
+// Render the live palette preview row — exact swatches of what will appear
+// in the exported 3MF. Gradient mode shows {stop colors} ∪ {base},
+// deduplicated. Image and none modes hide (their palette isn't pre-known).
+function _refreshPalettePreview() {
+  const wrap = document.querySelector('.palette-preview-wrap');
+  const row  = document.getElementById('color-palette-preview');
+  if (!wrap || !row) return;
+  if (settings.colorAutoSource !== 'gradient') {
+    wrap.classList.add('hidden');
+    return;
+  }
+  wrap.classList.remove('hidden');
+  const stops = (Array.isArray(settings.colorGradientStops) ? settings.colorGradientStops : []);
+  const colors = [];
+  const seen = new Set();
+  const add = (hex) => {
+    const h = (typeof hex === 'string' ? hex : '#000000').toLowerCase();
+    if (seen.has(h)) return;
+    seen.add(h); colors.push(h);
+  };
+  for (const s of stops) add(s.color);
+  add(settings.colorBaseColor || '#ffffff');
+  row.innerHTML = '';
+  for (const c of colors) {
+    const sw = document.createElement('div');
+    sw.className = 'palette-swatch';
+    sw.style.background = c;
+    sw.title = c;
+    row.appendChild(sw);
+  }
+  const count = document.createElement('span');
+  count.className = 'palette-count';
+  count.textContent = colors.length === 1 ? '1 color' : `${colors.length} colors`;
+  row.appendChild(count);
 }
 
 // Push the current color settings into the live preview material.
@@ -5002,7 +5164,7 @@ const PERSISTED_KEYS = [
   // sessionStorage (would blow the 5MB quota). `_lastColorMap` holds the
   // runtime cache.
   'colorExportEnabled', 'colorAutoSource', 'colorBaseColor', 'colorGradientStops',
-  'colorPaletteSize',
+  'colorPaletteSize', 'colorSnapPreview',
 ];
 
 function getSettingsSnapshot() {
@@ -5148,6 +5310,11 @@ function applySettingsSnapshot(snap) {
       if (el) { el.value = String(n); el.dispatchEvent(new Event('change', { bubbles: true })); }
     }
   }
+  if ('colorSnapPreview' in snap) {
+    settings.colorSnapPreview = !!snap.colorSnapPreview;
+    const el = document.getElementById('color-snap-preview');
+    if (el) { el.checked = settings.colorSnapPreview; el.dispatchEvent(new Event('change', { bubbles: true })); }
+  }
 }
 
 /**
@@ -5228,6 +5395,7 @@ const DEFAULT_SETTINGS_SNAPSHOT = Object.freeze({
     { pos: 1, color: '#dddddd' },
   ],
   colorPaletteSize: 4,
+  colorSnapPreview: false,
   activeMapName: DEFAULT_PRESET_NAME,
 });
 

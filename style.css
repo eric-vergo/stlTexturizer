@@ -1960,3 +1960,105 @@ input[type="number"].val:focus { outline: none; border-color: var(--accent); }
   cursor: pointer;
   flex-shrink: 0;
 }
+
+/* ── Stop properties panel (replaces alt-click + right-click affordances) ── */
+.stop-props {
+  margin-top: 10px;
+  padding: 8px 10px;
+  background: var(--surface2);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  display: grid;
+  gap: 6px;
+}
+.stop-props.disabled { opacity: 0.45; pointer-events: none; }
+.stop-props-header {
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--muted);
+  margin-bottom: 2px;
+}
+.stop-props-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.stop-props-row > label:not(.checkbox-label) {
+  flex: 0 0 70px;
+  font-size: 12px;
+  color: var(--muted);
+}
+.stop-props-row input[type="color"] {
+  width: 32px;
+  height: 26px;
+  padding: 0;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: transparent;
+  cursor: pointer;
+  flex-shrink: 0;
+}
+.stop-props-row input[type="color"]:disabled { cursor: not-allowed; opacity: 0.5; }
+.stop-props-row input[type="text"],
+.stop-props-row input[type="number"] {
+  width: 90px;
+  padding: 3px 6px;
+  font-family: ui-monospace, "SF Mono", Menlo, monospace;
+  font-size: 12px;
+  background: var(--surface);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 3px;
+}
+.stop-props-row input[type="text"]:disabled { opacity: 0.5; }
+.stop-pos-suffix { color: var(--muted); font-size: 12px; }
+#stop-remove-btn { font-size: 11px; }
+#stop-remove-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+
+/* ── Palette preview (live "what slicer sees" swatches) ─────────────────── */
+.palette-preview-wrap {
+  margin-top: 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.palette-preview-wrap.hidden { display: none; }
+.palette-preview-label {
+  font-size: 11px;
+  color: var(--muted);
+  letter-spacing: 0.02em;
+}
+.palette-preview {
+  display: flex;
+  gap: 4px;
+  align-items: center;
+  flex-wrap: wrap;
+}
+.palette-swatch {
+  width: 24px;
+  height: 24px;
+  border-radius: 4px;
+  border: 1px solid var(--border);
+  box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.2) inset;
+}
+.palette-count {
+  font-size: 11px;
+  color: var(--muted);
+  margin-left: 4px;
+}
+
+/* ── Gradient toolbar (snap-preview + reset) ───────────────────────────── */
+.gradient-toolbar {
+  margin-top: 10px;
+  padding-top: 8px;
+  border-top: 1px solid var(--border);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.gradient-toolbar .checkbox-label { font-size: 12px; }
+#color-gradient-reset { font-size: 11px; }

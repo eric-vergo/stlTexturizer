@@ -115,10 +115,10 @@ export class GradientEditor {
   constructor() {
     this._stops = normalizeStops([]);
     this._onChange = null;
+    this._onSelect = null;         // callback for selection changes (stop-props panel)
     this._mountEl = null;
     this._barEl = null;
     this._stopsLayerEl = null;
-    this._colorInputEl = null;
     this._selectedIdx = 0;
     this._dragState = null;        // { idx, startX, startY, startPos, removed }
     this._suppressEmit = false;
@@ -127,7 +127,6 @@ export class GradientEditor {
     this._onBarPointerDown = this._onBarPointerDown.bind(this);
     this._onWindowPointerMove = this._onWindowPointerMove.bind(this);
     this._onWindowPointerUp = this._onWindowPointerUp.bind(this);
-    this._onColorInput = this._onColorInput.bind(this);
   }
 
   mount(containerEl) {
@@ -136,11 +135,9 @@ export class GradientEditor {
     containerEl.classList.add('gradient-editor');
     containerEl.innerHTML = '';
 
-    // Outer wrapper: bar + handles + color input.
-    const row = document.createElement('div');
-    row.className = 'gradient-editor-row';
-
-    // The bar: shows the gradient + click zone.
+    // Bar + handles. The selected stop's color/position/lock are now edited
+    // in a separate properties panel owned by the orchestrator (main.js),
+    // not in a floating color input.
     const barWrap = document.createElement('div');
     barWrap.className = 'gradient-bar-wrap';
 
@@ -156,32 +153,112 @@ export class GradientEditor {
 
     barWrap.appendChild(bar);
     barWrap.appendChild(stopsLayer);
-
-    // Native color input for the selected stop.
-    const colorInput = document.createElement('input');
-    colorInput.type = 'color';
-    colorInput.className = 'gradient-stop-color-input';
-    colorInput.value = '#888888';
-    colorInput.addEventListener('input', this._onColorInput);
-    colorInput.addEventListener('change', this._onColorInput);
-
-    row.appendChild(barWrap);
-    row.appendChild(colorInput);
-    containerEl.appendChild(row);
+    containerEl.appendChild(barWrap);
 
     this._barEl = bar;
     this._stopsLayerEl = stopsLayer;
-    this._colorInputEl = colorInput;
 
     this._render();
+    this._notifySelect();
   }
 
   setStops(stops) {
     this._stops = normalizeStops(stops);
     if (this._selectedIdx >= this._stops.length) this._selectedIdx = 0;
     this._render();
+    this._notifySelect();
     // setStops is "external apply"; do NOT emit change to avoid feedback loops.
   }
+
+  // ─── Public API used by the stop-properties panel (main.js) ────────────
+
+  /** Returns the currently-selected stop index, or -1 if none. */
+  getSelectedIdx() {
+    return (this._selectedIdx >= 0 && this._selectedIdx < this._stops.length)
+      ? this._selectedIdx : -1;
+  }
+
+  /** Returns a deep copy of the currently-selected stop, or null. */
+  getSelectedStop() {
+    const i = this.getSelectedIdx();
+    if (i < 0) return null;
+    const s = this._stops[i];
+    return { pos: s.pos, color: s.color, lockedToBase: !!s.lockedToBase };
+  }
+
+  /** Set selectedIdx, clamped. Emits select but not change. */
+  setSelectedIdx(idx) {
+    if (!Number.isInteger(idx)) return;
+    const next = Math.max(0, Math.min(idx, this._stops.length - 1));
+    if (next === this._selectedIdx) return;
+    this._selectedIdx = next;
+    this._render();
+    this._notifySelect();
+  }
+
+  /** Edit the selected stop's color. Auto-unlocks if it was locked. */
+  setSelectedColor(hex) {
+    const i = this.getSelectedIdx();
+    if (i < 0 || typeof hex !== 'string') return;
+    const s = this._stops[i];
+    if (s.color === hex && !s.lockedToBase) return;
+    if (s.lockedToBase) s.lockedToBase = false;
+    s.color = hex;
+    this._render();
+    this._notifySelect();
+    this._emitChange();
+  }
+
+  /** Edit the selected stop's position (0..1). Resorts and updates index. */
+  setSelectedPos(pos) {
+    const i = this.getSelectedIdx();
+    if (i < 0 || typeof pos !== 'number' || !Number.isFinite(pos)) return;
+    const s = this._stops[i];
+    const np = clamp01(pos);
+    if (s.pos === np) return;
+    s.pos = np;
+    const ref = s;
+    this._stops.sort((a, b) => a.pos - b.pos);
+    this._selectedIdx = this._stops.indexOf(ref);
+    if (this._selectedIdx < 0) this._selectedIdx = 0;
+    this._render();
+    this._notifySelect();
+    this._emitChange();
+  }
+
+  /** Toggle / set the selected stop's lockedToBase. When locking, color snaps to base. */
+  setSelectedLocked(locked) {
+    const i = this.getSelectedIdx();
+    if (i < 0) return;
+    const s = this._stops[i];
+    const next = !!locked;
+    if (s.lockedToBase === next) return;
+    s.lockedToBase = next;
+    if (next && typeof this._baseColor === 'string') s.color = this._baseColor;
+    this._render();
+    this._notifySelect();
+    this._emitChange();
+  }
+
+  /** Remove the currently-selected stop. Refuses if it would leave < 2 stops. */
+  removeSelected() {
+    this._removeStopAt(this._selectedIdx);
+  }
+
+  /** Restore a sensible 2-stop greyscale default. */
+  resetToDefault() {
+    this._stops = normalizeStops([
+      { pos: 0, color: '#222222' },
+      { pos: 1, color: '#dddddd' },
+    ]);
+    this._selectedIdx = 0;
+    this._render();
+    this._notifySelect();
+    this._emitChange();
+  }
+
+  /** Register a selection callback (called whenever the selected stop changes). */
+  onSelect(cb) { this._onSelect = typeof cb === 'function' ? cb : null; }
 
   getStops() {
     return this._stops.map(s => ({
@@ -250,9 +327,12 @@ export class GradientEditor {
       this._stopsLayerEl.appendChild(handle);
     }
 
-    // Update the color input to reflect selected stop.
-    if (this._colorInputEl && this._stops[this._selectedIdx]) {
-      this._colorInputEl.value = this._stops[this._selectedIdx].color;
+  }
+
+  _notifySelect() {
+    if (typeof this._onSelect === 'function') {
+      try { this._onSelect(this.getSelectedStop(), this.getSelectedIdx()); }
+      catch (err) { console.warn('GradientEditor onSelect threw:', err); }
     }
   }
 
@@ -287,6 +367,7 @@ export class GradientEditor {
     this._selectedIdx = this._stops.findIndex(s => s.pos === pos && s.color === color);
     if (this._selectedIdx < 0) this._selectedIdx = 0;
     this._render();
+    this._notifySelect();
     this._emitChange();
   }
 
@@ -310,12 +391,14 @@ export class GradientEditor {
       }
       this._selectedIdx = idx;
       this._render();
+      this._notifySelect();
       this._emitChange();
       return;
     }
 
     this._selectedIdx = idx;
     this._render();
+    this._notifySelect();
     // Begin drag.
     this._dragState = {
       idx,
@@ -376,6 +459,7 @@ export class GradientEditor {
     this._selectedIdx = this._stops.indexOf(ref);
     if (this._selectedIdx < 0) this._selectedIdx = 0;
     this._render();
+    this._notifySelect();
     if (ds.moved) this._emitChange();
   }
 
@@ -389,20 +473,7 @@ export class GradientEditor {
     if (this._selectedIdx >= this._stops.length) this._selectedIdx = this._stops.length - 1;
     if (this._selectedIdx < 0) this._selectedIdx = 0;
     this._render();
-    this._emitChange();
-  }
-
-  _onColorInput(ev) {
-    const v = ev.target.value;
-    const stop = this._stops[this._selectedIdx];
-    if (!stop || typeof v !== 'string') return;
-    if (stop.color === v) return;
-    // Editing the color of a locked stop auto-unlocks it. Otherwise the user
-    // would type a new color and see it instantly snap back to base, which
-    // is confusing.
-    if (stop.lockedToBase) stop.lockedToBase = false;
-    stop.color = v;
-    this._render();
+    this._notifySelect();
     this._emitChange();
   }
 }

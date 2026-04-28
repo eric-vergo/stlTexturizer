@@ -565,7 +565,54 @@
         <!-- Gradient sub-section (visible when source=gradient) -->
         <div class="color-sub gradient-sub">
           <div id="color-gradient-mount"></div>
-          <p class="color-hint" data-i18n="color.gradientHint">Click bar to add stop. Right-click to remove. Drag to move.</p>
+          <p class="color-hint" data-i18n="color.gradientHint">Click bar to add a stop · Click handle to select · Drag to move</p>
+
+          <!-- Stop properties panel: drives the currently-selected stop. -->
+          <div class="stop-props" id="color-stop-props">
+            <div class="stop-props-header" data-i18n="color.stopPropsHeading">Selected stop</div>
+            <div class="stop-props-row">
+              <label for="stop-color-input" data-i18n="color.stopColor">Color</label>
+              <input type="color" id="stop-color-input" value="#888888" />
+              <input type="text" id="stop-hex-input" maxlength="7" placeholder="#rrggbb"
+                     spellcheck="false" autocomplete="off" />
+            </div>
+            <div class="stop-props-row">
+              <label for="stop-pos-input" data-i18n="color.stopPosition">Position</label>
+              <input type="number" id="stop-pos-input" min="0" max="100" step="1" />
+              <span class="stop-pos-suffix">%</span>
+            </div>
+            <div class="stop-props-row">
+              <label class="checkbox-label" for="stop-lock-input">
+                <input type="checkbox" id="stop-lock-input" />
+                <span data-i18n="color.stopLockToBase">Lock to base color</span>
+              </label>
+            </div>
+            <div class="stop-props-row">
+              <button id="stop-remove-btn" class="excl-clear-btn" type="button"
+                      data-i18n="color.stopRemove">Remove stop</button>
+            </div>
+          </div>
+
+          <!-- Live palette preview: the exact colors that will land in the
+               exported 3MF. Updates whenever stops or base color change. -->
+          <div class="palette-preview-wrap">
+            <div class="palette-preview-label" data-i18n="color.paletteLabel">Will export as:</div>
+            <div class="palette-preview" id="color-palette-preview"></div>
+          </div>
+
+          <!-- Gradient toolbar: snap-preview toggle + reset. -->
+          <div class="gradient-toolbar">
+            <label class="checkbox-label" for="color-snap-preview"
+                   data-i18n-title="tooltips.colorSnapPreview"
+                   title="Show the live preview using exactly the exported colors instead of a smooth gradient. More accurate to what your slicer will print.">
+              <input type="checkbox" id="color-snap-preview" />
+              <span data-i18n="color.snapPreview">Show as printed colors</span>
+            </label>
+            <button id="color-gradient-reset" class="excl-clear-btn" type="button"
+                    data-i18n="color.gradientReset"
+                    data-i18n-title="tooltips.colorGradientReset"
+                    title="Restore the default 2-stop greyscale gradient.">↺ Reset</button>
+          </div>
         </div>
 
         <!-- Image sub-section (visible when source=image) -->
