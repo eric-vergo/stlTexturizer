@@ -89,18 +89,23 @@ function normalizeStops(input) {
         .map(s => ({
           pos:   clamp01(typeof s.pos === 'number' ? s.pos : 0),
           color: (typeof s.color === 'string' ? s.color : '#888888'),
+          // `lockedToBase` ties this stop's color to the user's base-color
+          // setting. The editor displays it with a lock indicator and skips
+          // color-input edits for it. Stored on the stop so it persists
+          // through .bumpmesh / undo / sessionStorage round-trips.
+          lockedToBase: !!s.lockedToBase,
         }))
     : [];
   // Ensure ≥2 stops; pad with sensible defaults at endpoints.
   if (stops.length === 0) {
     stops = [
-      { pos: 0, color: '#222222' },
-      { pos: 1, color: '#dddddd' },
+      { pos: 0, color: '#222222', lockedToBase: false },
+      { pos: 1, color: '#dddddd', lockedToBase: false },
     ];
   } else if (stops.length === 1) {
     const only = stops[0];
-    if (only.pos < 1) stops.push({ pos: 1, color: only.color });
-    else stops.unshift({ pos: 0, color: only.color });
+    if (only.pos < 1) stops.push({ pos: 1, color: only.color, lockedToBase: false });
+    else stops.unshift({ pos: 0, color: only.color, lockedToBase: false });
   }
   stops.sort((a, b) => a.pos - b.pos);
   return stops;
@@ -179,11 +184,35 @@ export class GradientEditor {
   }
 
   getStops() {
-    return this._stops.map(s => ({ pos: s.pos, color: s.color }));
+    return this._stops.map(s => ({
+      pos: s.pos,
+      color: s.color,
+      lockedToBase: !!s.lockedToBase,
+    }));
   }
 
   onChange(cb) {
     this._onChange = typeof cb === 'function' ? cb : null;
+  }
+
+  /**
+   * Set the base color used by stops with `lockedToBase: true`. Called by the
+   * orchestrator (main.js) whenever the user changes the base-color picker.
+   * Updates locked stops in-place and re-renders. Emits a change event iff
+   * any locked stop's color actually moved.
+   */
+  setBaseColor(hex) {
+    if (typeof hex !== 'string') return;
+    this._baseColor = hex;
+    let mutated = false;
+    for (const s of this._stops) {
+      if (s.lockedToBase && s.color !== hex) {
+        s.color = hex;
+        mutated = true;
+      }
+    }
+    this._render();
+    if (mutated) this._emitChange();
   }
 
   // ─── Internal: rendering ───────────────────────────────────────────────
@@ -204,12 +233,15 @@ export class GradientEditor {
       const handle = document.createElement('div');
       handle.className = 'gradient-stop-handle';
       if (i === this._selectedIdx) handle.classList.add('selected');
+      if (stop.lockedToBase) handle.classList.add('locked-to-base');
       handle.style.left = (stop.pos * 100) + '%';
       handle.style.width = STOP_HANDLE_SIZE_PX + 'px';
       handle.style.height = STOP_HANDLE_SIZE_PX + 'px';
       handle.style.background = stop.color;
       handle.dataset.idx = String(i);
-      handle.title = `${(stop.pos * 100).toFixed(0)}% — ${stop.color}`;
+      handle.title = stop.lockedToBase
+        ? `${(stop.pos * 100).toFixed(0)}% — locked to base color (${stop.color}). Alt-click to unlock.`
+        : `${(stop.pos * 100).toFixed(0)}% — ${stop.color}. Alt-click to lock to base color.`;
       handle.addEventListener('pointerdown', (ev) => this._onStopPointerDown(ev, i));
       handle.addEventListener('contextmenu', (ev) => {
         ev.preventDefault();
@@ -266,6 +298,22 @@ export class GradientEditor {
     if (ev.button !== 0) return;
     ev.preventDefault();
     ev.stopPropagation();
+
+    // Alt-click toggles "locked to base color" for this stop. When locking,
+    // the stop's color snaps to the current base color immediately.
+    if (ev.altKey) {
+      const s = this._stops[idx];
+      if (!s) return;
+      s.lockedToBase = !s.lockedToBase;
+      if (s.lockedToBase && typeof this._baseColor === 'string') {
+        s.color = this._baseColor;
+      }
+      this._selectedIdx = idx;
+      this._render();
+      this._emitChange();
+      return;
+    }
+
     this._selectedIdx = idx;
     this._render();
     // Begin drag.
@@ -349,6 +397,10 @@ export class GradientEditor {
     const stop = this._stops[this._selectedIdx];
     if (!stop || typeof v !== 'string') return;
     if (stop.color === v) return;
+    // Editing the color of a locked stop auto-unlocks it. Otherwise the user
+    // would type a new color and see it instantly snap back to base, which
+    // is confusing.
+    if (stop.lockedToBase) stop.lockedToBase = false;
     stop.color = v;
     this._render();
     this._emitChange();

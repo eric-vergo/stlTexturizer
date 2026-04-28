@@ -1785,14 +1785,22 @@ function wireColorExportUI() {
     });
   });
 
-  // 4) Base color picker.
+  // 4) Base color picker. Also propagates to the gradient editor so any
+  // stop with lockedToBase: true tracks this color in real time.
   const baseEl = document.getElementById('color-base-picker');
   if (baseEl) {
     baseEl.value = settings.colorBaseColor;
     baseEl.addEventListener('change', () => {
       settings.colorBaseColor = baseEl.value;
+      if (window._gradientEditor && typeof window._gradientEditor.setBaseColor === 'function') {
+        window._gradientEditor.setBaseColor(baseEl.value);
+      }
       _pushColorPreviewState();
     });
+  }
+  // Initial sync so locked stops carry the right color from the get-go.
+  if (window._gradientEditor && typeof window._gradientEditor.setBaseColor === 'function') {
+    window._gradientEditor.setBaseColor(settings.colorBaseColor);
   }
 
   // 4b) Palette size selector — controls how many distinct colors land in the
@@ -1913,6 +1921,56 @@ function _hexToRGB01(hex) {
   const n = parseInt(h, 16);
   if (!Number.isFinite(n)) return [1, 1, 1];
   return [((n >> 16) & 0xff) / 255, ((n >> 8) & 0xff) / 255, (n & 0xff) / 255];
+}
+
+function _hexToRGB255(hex) {
+  const c01 = _hexToRGB01(hex);
+  return [Math.round(c01[0] * 255), Math.round(c01[1] * 255), Math.round(c01[2] * 255)];
+}
+
+/**
+ * Snap each triangle in `triRGB` to the nearest gradient stop OR the base
+ * color (Euclidean RGB distance). Returns { palette, triPaletteIndices }
+ * matching the shape that export3MF expects.
+ *
+ * The output palette is exactly the user's control points (deduplicated):
+ * gradient stop colors first, base color last. No statistical averaging,
+ * so the exported colors are pixel-exact what the user picked. Slicer-side
+ * AMS slot assignment is predictable.
+ */
+function _snapToControlPoints(triRGB, s) {
+  const stops = Array.isArray(s.colorGradientStops) ? s.colorGradientStops : [];
+  const palRGB = []; // array of [r, g, b] in 0..255
+  const palSet = new Set();
+  const pushIfNew = (rgb) => {
+    const key = (rgb[0] << 16) | (rgb[1] << 8) | rgb[2];
+    if (palSet.has(key)) return;
+    palSet.add(key); palRGB.push(rgb);
+  };
+  for (const stop of stops) pushIfNew(_hexToRGB255(stop.color));
+  pushIfNew(_hexToRGB255(s.colorBaseColor || '#ffffff'));
+  if (palRGB.length === 0) palRGB.push([255, 255, 255]); // defensive
+
+  const triCount = (triRGB.length / 3) | 0;
+  const indices = new Uint16Array(triCount);
+  for (let i = 0; i < triCount; i++) {
+    const r = triRGB[i * 3], g = triRGB[i * 3 + 1], b = triRGB[i * 3 + 2];
+    let best = 0, bestD = Infinity;
+    for (let j = 0; j < palRGB.length; j++) {
+      const p = palRGB[j];
+      const dr = r - p[0], dg = g - p[1], db = b - p[2];
+      const d = dr * dr + dg * dg + db * db;
+      if (d < bestD) { bestD = d; best = j; }
+    }
+    indices[i] = best;
+  }
+  const palette = new Uint8Array(palRGB.length * 3);
+  for (let i = 0; i < palRGB.length; i++) {
+    palette[i * 3]     = palRGB[i][0];
+    palette[i * 3 + 1] = palRGB[i][1];
+    palette[i * 3 + 2] = palRGB[i][2];
+  }
+  return { palette, triPaletteIndices: indices };
 }
 
 // Push the current color settings into the live preview material.
@@ -4557,9 +4615,21 @@ async function handleExport(format = 'stl') {
           triRGB[i * 3 + 2] = Math.round(Math.max(0, Math.min(1, b)) * 255);
         }
         try {
-          const paletteCap = Math.max(2, Math.min(32, +settings.colorPaletteSize || 4));
-          const { palette, indices } = medianCut(triRGB, paletteCap);
-          exportOpts = { palette, triPaletteIndices: indices };
+          if (settings.colorAutoSource === 'gradient') {
+            // Snap each triangle's color to the nearest of the user-defined
+            // gradient stops + the base color. The user picks the colors;
+            // no statistical averaging — the exported palette is exactly
+            // the control points they specified. AMS slot assignment is
+            // predictable: stop-count + maybe-1 (base) entries.
+            exportOpts = _snapToControlPoints(triRGB, settings);
+          } else {
+            // Image source (or fallback): median-cut at the user-chosen
+            // palette size. Image data has no natural "control points" so
+            // statistical clustering is the right tool here.
+            const paletteCap = Math.max(2, Math.min(32, +settings.colorPaletteSize || 4));
+            const { palette, indices } = medianCut(triRGB, paletteCap);
+            exportOpts = { palette, triPaletteIndices: indices };
+          }
         } catch (err) {
           console.warn('Quantization failed; exporting without color:', err);
         }
